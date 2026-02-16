@@ -13,6 +13,7 @@ type Props = {
   score: number;
   scoreMax: number;
   searchIndexScore: number;
+  locationBonus: number;
   adEventPenalty: number;
   penaltyDetectedCount: number;
   hotplaceRecentCount: number;
@@ -24,7 +25,6 @@ type Props = {
   onUpdate: (key: string, nextMeta: PlaceMeta) => void;
 };
 
-const TAGS = ["혼밥", "데이트", "가족", "회식", "가성비"] as const;
 const PENALTY_PATTERNS = [/협찬/, /제공/, /광고/, /체험단/, /리뷰\s*이벤트/, /원고료/] as const;
 
 function extractSigungu(address: string): string {
@@ -48,6 +48,7 @@ export default function PlaceCard({
   score,
   scoreMax,
   searchIndexScore,
+  locationBonus,
   adEventPenalty,
   penaltyDetectedCount,
   hotplaceRecentCount,
@@ -70,12 +71,6 @@ export default function PlaceCard({
 
   function commit(next: PlaceMeta) {
     onUpdate(key, { ...next, updatedAt: Date.now() });
-  }
-
-  function toggleTag(tag: (typeof TAGS)[number]) {
-    const on = meta.tags.includes(tag);
-    const tags = on ? meta.tags.filter((t) => t !== tag) : [...meta.tags, tag];
-    commit({ ...meta, tags });
   }
 
   useEffect(() => {
@@ -217,6 +212,9 @@ export default function PlaceCard({
             {score.toFixed(1)}/{scoreMax.toFixed(1)}점
           </div>
           <div style={{ fontSize: 12, color: "#6b7280" }}>점수</div>
+          <div style={{ marginTop: 4, fontSize: 11, color: penaltyDetectedCount > 0 ? "#b91c1c" : "#6b7280", fontWeight: 700 }}>
+            광고/이벤트 단어 탐지 {penaltyDetectedCount}건
+          </div>
         </div>
       </div>
 
@@ -235,6 +233,7 @@ export default function PlaceCard({
         }}
       >
         <span>검색지수 +{searchIndexScore.toFixed(1)}</span>
+        <span>위치 가점 +{locationBonus.toFixed(1)}</span>
         <span>광고/이벤트 감점 -{adEventPenalty.toFixed(1)}</span>
       </div>
 
@@ -286,47 +285,6 @@ export default function PlaceCard({
           {meta.saved ? "찜됨" : "찜(저장)"}
         </button>
 
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 6,
-            padding: "6px 10px",
-            borderRadius: 10,
-            border: "1px solid #e5e7eb",
-            background: "#fff",
-          }}
-        >
-          <span style={{ fontSize: 12, color: "#6b7280" }}>재방문</span>
-          <button
-            onClick={() => commit({ ...meta, revisitCount: Math.max(0, meta.revisitCount - 1) })}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              background: "#f9fafb",
-              fontWeight: 900,
-            }}
-          >
-            -
-          </button>
-          <span style={{ minWidth: 18, textAlign: "center", fontWeight: 800 }}>{meta.revisitCount}</span>
-          <button
-            onClick={() => commit({ ...meta, revisitCount: meta.revisitCount + 1 })}
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              border: "1px solid #e5e7eb",
-              background: "#f9fafb",
-              fontWeight: 900,
-            }}
-          >
-            +
-          </button>
-        </div>
-
         <a href={naverMapLink} target="_blank" rel="noreferrer">
           <button
             style={{
@@ -337,40 +295,14 @@ export default function PlaceCard({
               fontWeight: 800,
             }}
           >
-            네이버 지도 열기
+            네이버 지도
           </button>
         </a>
-      </div>
-
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
-        {TAGS.map((tag) => {
-          const on = meta.tags.includes(tag);
-          return (
-            <button
-              key={tag}
-              onClick={() => toggleTag(tag)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 999,
-                border: "1px solid #e5e7eb",
-                background: on ? "#111827" : "#f3f4f6",
-                color: on ? "#fff" : "#111827",
-                fontWeight: 700,
-                fontSize: 12,
-              }}
-            >
-              {tag}
-            </button>
-          );
-        })}
       </div>
 
       <div style={{ marginTop: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: "#374151" }}>최신 블로그 후기</div>
-          <div style={{ fontSize: 11, color: penaltyDetectedCount > 0 ? "#b91c1c" : "#6b7280", fontWeight: 700 }}>
-            광고/이벤트 단어 탐지 {penaltyDetectedCount}건
-          </div>
         </div>
         {loadingBlogs ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>불러오는 중...</div>

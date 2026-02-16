@@ -10,6 +10,29 @@ import { getTopHotplace, type HotplaceScoreResult } from "../lib/hotplace";
 type Region = "수원" | "여수" | "대구";
 
 const REGIONS: Region[] = ["수원", "여수", "대구"];
+const EARTH_RADIUS_KM = 6371;
+const NEARBY_DISTANCE_KM = 3;
+
+function toRadians(degree: number): number {
+  return (degree * Math.PI) / 180;
+}
+
+function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const dLat = toRadians(bLat - aLat);
+  const dLng = toRadians(bLng - aLng);
+  const aa =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRadians(aLat)) * Math.cos(toRadians(bLat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+  return EARTH_RADIUS_KM * c;
+}
+
+function parseMapCoordinate(raw: string): number | null {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n === 0) return null;
+  if (Math.abs(n) > 1000) return n / 10_000_000;
+  return n;
+}
 
 export default function Page() {
   const [query, setQuery] = useState("");
@@ -18,6 +41,8 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hotMode, setHotMode] = useState(false);
+  const [useNearbyBoost, setUseNearbyBoost] = useState(false);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
 
   const [metaMap, setMetaMap] = useState<Record<string, PlaceMeta>>({});
   const [penaltySignalMap, setPenaltySignalMap] = useState<Record<string, number>>({});
@@ -79,12 +104,35 @@ export default function Page() {
     });
   }, []);
 
-  async function search() {
+  useEffect(() => {
+    if (!useNearbyBoost) return;
+    if (userLocation) return;
+    if (typeof window === "undefined" || !navigator.geolocation) {
+      setError("이 브라우저에서는 위치 정보를 지원하지 않습니다.");
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setUserLocation({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+        });
+      },
+      () => {
+        setUseNearbyBoost(false);
+        setError("위치 권한을 허용하면 가까운 곳 우선 가점을 적용할 수 있습니다.");
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 120000 },
+    );
+  }, [useNearbyBoost, userLocation]);
+
+  async function search(nextHotMode: boolean) {
     const q = query.trim();
     if (!q) return;
 
     setLoading(true);
     setError(null);
+    setHotMode(nextHotMode);
     try {
       const params = new URLSearchParams({
         query: q,
@@ -129,8 +177,12 @@ export default function Page() {
 
       const searchIndexScore = Math.max(0.5, 5 - idx * 0.5);
       const adEventPenalty = (penaltySignalMap[key] ?? 0) > 0 ? 1 : 0;
-      const scoreMax = 5.0;
-      const score = Math.max(0, Math.min(scoreMax, searchIndexScore - adEventPenalty));
+      const lat = parseMapCoordinate(it.mapy);
+      const lng = parseMapCoordinate(it.mapx);
+      const locationBonus =
+        useNearbyBoost && userLocation && lat !== null && lng !== null && distanceKm(userLocation.lat, userLocation.lng, lat, lng) <= NEARBY_DISTANCE_KM ? 1 : 0;
+      const scoreMax = 6.0;
+      const score = Math.max(0, Math.min(scoreMax, searchIndexScore + locationBonus - adEventPenalty));
 
       const hotplace =
         hotplaceMap[key] ??
@@ -147,7 +199,7 @@ export default function Page() {
 
       const isHotNow =
         hotplace.recent3mCount > 0 || hotplace.multiplier > 1 || hotplace.hotKeywordCount > 0;
-      const hotRankScore = hotplace.hotplaceScore + searchIndexScore * 3;
+      const hotRankScore = hotplace.recent3mCount * 100 + hotplace.hotKeywordCount * 10 + searchIndexScore;
 
       return {
         it,
@@ -156,6 +208,7 @@ export default function Page() {
         score,
         scoreMax,
         searchIndexScore,
+        locationBonus,
         adEventPenalty,
         penaltyDetectedCount: penaltySignalMap[key] ?? 0,
         hotplaceScore: hotplace.hotplaceScore,
@@ -169,16 +222,16 @@ export default function Page() {
     });
 
     if (hotMode) {
-      const hotOnly = enriched.filter((e) => e.isHotNow);
-      hotOnly.sort(
+      const hotSorted = [...enriched];
+      hotSorted.sort(
         (a, b) =>
           b.hotRankScore - a.hotRankScore ||
-          b.hotplaceScore - a.hotplaceScore ||
+          b.hotplaceRecentCount - a.hotplaceRecentCount ||
           b.hotKeywordCount - a.hotKeywordCount ||
-          b.hotplaceRatio - a.hotplaceRatio ||
-          b.searchIndexScore - a.searchIndexScore,
+          b.searchIndexScore - a.searchIndexScore ||
+          b.score - a.score,
       );
-      return hotOnly;
+      return hotSorted;
     }
 
     enriched.sort((a, b) => b.score - a.score || b.meta.updatedAt - a.meta.updatedAt);
@@ -189,7 +242,6 @@ export default function Page() {
     () =>
       getTopHotplace(
         prepared
-          .filter((p) => p.isHotNow)
           .map((p) => ({
             name: p.it.title,
             score: {
@@ -202,7 +254,8 @@ export default function Page() {
               hotKeywordCount: p.hotKeywordCount,
               recentHotKeywordCount: p.hotKeywordCount,
             },
-          })),
+          }))
+          .filter((p) => p.score.recent3mCount > 0 || p.score.hotKeywordCount > 0),
       ),
     [prepared],
   );
@@ -258,9 +311,9 @@ export default function Page() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter") search();
+                if (e.key === "Enter") search(false);
               }}
-              placeholder="메뉴를 입력하세요 (예 : 국밥)"
+              placeholder="동네이름 또는 메뉴를 입력하세요 (예 : 수원 국밥)"
               style={{
                 flex: 1,
                 height: 46,
@@ -273,7 +326,7 @@ export default function Page() {
               }}
             />
             <button
-              onClick={search}
+              onClick={() => search(false)}
               disabled={loading || !query.trim()}
               style={{
                 height: 46,
@@ -289,24 +342,47 @@ export default function Page() {
             >
               검색
             </button>
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
-              onClick={() => setHotMode((v) => !v)}
+              onClick={() => search(true)}
+              disabled={loading || !query.trim()}
               style={{
-                padding: "6px 10px",
-                borderRadius: 999,
+                height: 46,
+                padding: "0 16px",
+                borderRadius: 14,
                 border: "1px solid #b45309",
-                background: hotMode ? "#b45309" : "#ffffff",
-                color: hotMode ? "#fff" : "#b45309",
+                background: hotMode ? "#b45309" : "#fff7ed",
+                color: hotMode ? "#fff" : "#9a3412",
                 fontWeight: 800,
-                fontSize: 12,
+                opacity: loading || !query.trim() ? 0.6 : 1,
+                cursor: loading || !query.trim() ? "not-allowed" : "pointer",
               }}
             >
-              핫플 {hotMode ? "ON" : "OFF"}
+              핫플
             </button>
           </div>
+
+          <label
+            style={{
+              marginTop: 2,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              color: "#374151",
+              fontWeight: 700,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={useNearbyBoost}
+              onChange={(e) => {
+                const checked = e.target.checked;
+                setUseNearbyBoost(checked);
+                if (!checked) setUserLocation(null);
+              }}
+            />
+            가까운곳 우선 (위치 동의, +1점)
+          </label>
         </div>
 
         {loading ? <div style={{ padding: 12, color: "#6b7280" }}>검색중...</div> : null}
@@ -329,10 +405,6 @@ export default function Page() {
           </div>
         ) : null}
 
-        {!loading && !error && items.length > 0 && prepared.length === 0 ? (
-          <div style={{ padding: 12, color: "#6b7280" }}>핫플 조건에 맞는 결과가 없습니다.</div>
-        ) : null}
-
         <div style={{ marginTop: 14 }}>
           {prepared.map(
             ({
@@ -342,6 +414,7 @@ export default function Page() {
               score,
               scoreMax,
               searchIndexScore,
+              locationBonus,
               adEventPenalty,
               penaltyDetectedCount,
               hotplaceRecentCount,
@@ -355,6 +428,7 @@ export default function Page() {
                 score={score}
                 scoreMax={scoreMax}
                 searchIndexScore={searchIndexScore}
+                locationBonus={locationBonus}
                 adEventPenalty={adEventPenalty}
                 penaltyDetectedCount={penaltyDetectedCount}
                 hotplaceRecentCount={hotplaceRecentCount}
