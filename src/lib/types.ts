@@ -8,7 +8,6 @@ export type NaverLocalItem = {
   roadAddress: string;
   mapx: string;
   mapy: string;
-  mapImageUrl?: string;
 };
 
 export type NaverBlogItem = {
