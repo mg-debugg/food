@@ -34,5 +34,6 @@ export function getOrInitMeta(
 }
 
 export function computeLocalScore(meta: PlaceMeta): number {
-  return (meta.saved ? 5 : 0) + meta.revisitCount * 3 + meta.tags.length * 2;
+  // Keep a non-zero baseline so new items are still comparable in local mode.
+  return 1 + (meta.saved ? 5 : 0) + meta.revisitCount * 3 + meta.tags.length * 2;
 }

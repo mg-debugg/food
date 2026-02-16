@@ -8,6 +8,12 @@ function stripHtmlTags(s: string): string {
   return s.replace(/<[^>]*>/g, "");
 }
 
+function clampInt(input: string, min: number, max: number, fallback: number): number {
+  const n = Number.parseInt(input, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const sp = url.searchParams;
@@ -18,8 +24,8 @@ export async function GET(req: Request) {
     ? (regionRaw as Region)
     : "수원";
 
-  const display = sp.get("display") ?? "20";
-  const start = sp.get("start") ?? "1";
+  const wantedDisplay = clampInt(sp.get("display") ?? "10", 1, 10, 10);
+  const start = clampInt(sp.get("start") ?? "1", 1, 1000, 1);
   const sortRaw = (sp.get("sort") ?? "random").toLowerCase();
   const sort = sortRaw === "comment" ? "comment" : "random";
 
@@ -43,44 +49,69 @@ export async function GET(req: Request) {
   }
 
   const finalQuery = `${region} ${query}`;
-  const endpoint = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(
-    finalQuery,
-  )}&display=${encodeURIComponent(display)}&start=${encodeURIComponent(
-    start,
-  )}&sort=${encodeURIComponent(sort)}`;
+  const headers = {
+    "X-Naver-Client-Id": clientId,
+    "X-Naver-Client-Secret": clientSecret,
+  };
 
-  try {
+  async function fetchPage(display: number, pageStart: number) {
+    const endpoint = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(
+      finalQuery,
+    )}&display=${encodeURIComponent(String(display))}&start=${encodeURIComponent(
+      String(pageStart),
+    )}&sort=${encodeURIComponent(sort)}`;
     const res = await fetch(endpoint, {
       method: "GET",
-      headers: {
-        "X-Naver-Client-Id": clientId,
-        "X-Naver-Client-Secret": clientSecret,
-      },
+      headers,
       cache: "no-store",
     });
-
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      return Response.json(
-        { error: "naver api error", status: res.status, detail },
-        { status: res.status, headers: { "Cache-Control": "no-store" } },
-      );
+      throw new Error(`naver api error (${res.status}): ${detail}`);
+    }
+    return (await res.json()) as any;
+  }
+
+  try {
+    const firstDisplay = Math.min(5, wantedDisplay);
+    const first = await fetchPage(firstDisplay, start);
+
+    let mergedItems = Array.isArray(first?.items) ? first.items : [];
+    if (wantedDisplay > 5) {
+      const secondDisplay = wantedDisplay - firstDisplay;
+      const secondStart = start + firstDisplay;
+      const second = await fetchPage(secondDisplay, secondStart);
+      const secondItems = Array.isArray(second?.items) ? second.items : [];
+      mergedItems = [...mergedItems, ...secondItems];
     }
 
-    const json = (await res.json()) as any;
-    if (Array.isArray(json?.items)) {
-      json.items = json.items.map((it: any) => ({
+    const seen = new Set<string>();
+    const normalizedItems = mergedItems
+      .map((it: any) => ({
         ...it,
         title: stripHtmlTags(String(it?.title ?? "")),
-      }));
-    }
+      }))
+      .filter((it: any) => {
+        const key = `${it.title}|${it.roadAddress || it.address || ""}|${it.mapx || ""}|${it.mapy || ""}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(0, wantedDisplay);
+
+    const json = { ...first, items: normalizedItems };
 
     return Response.json(json, { headers: { "Cache-Control": "no-store" } });
   } catch (err: any) {
+    const detail = String(err?.message ?? err);
+    const statusMatch = detail.match(/\((\d{3})\)/);
+    const status = statusMatch ? Number.parseInt(statusMatch[1], 10) : 500;
     return Response.json(
-      { error: "unexpected server error", detail: String(err?.message ?? err) },
-      { status: 500, headers: { "Cache-Control": "no-store" } },
+      {
+        error: status >= 400 && status < 500 ? "naver api error" : "unexpected server error",
+        detail,
+      },
+      { status, headers: { "Cache-Control": "no-store" } },
     );
   }
 }
-
