@@ -26,6 +26,11 @@ export type NopoResult = {
     posCount: number;
     negCount: number;
     franchiseLikely: number;
+    agePoint: number;
+    strongKeywordCount: number;
+    regularKeywordCount: number;
+    strongKeywordPoint: number;
+    regularKeywordPoint: number;
   };
 };
 
@@ -73,6 +78,8 @@ const POS_NAME_PATTERNS = [
 ] as const;
 
 const NEG_NAME_PATTERNS = [/키친/g, /다이닝/g, /랩/g, /하우스/g, /바/g, /라운지/g] as const;
+const STRONG_BONUS_PATTERNS = [/아저씨/g, /등산객/g, /택시/g, /기사님/g, /반주/g, /낮술/g] as const;
+const REGULAR_BONUS_PATTERNS = [/10년/g, /단골/g, /옛날/g, /허름/g, /노포/g] as const;
 
 function clamp(n: number, min = 0, max = 1): number {
   return Math.min(max, Math.max(min, n));
@@ -166,6 +173,13 @@ export function computeNopoScore(input: NopoInput): NopoResult {
   const franchiseLikely = (input.sameNameCount ?? 1) >= 3 ? 1 : 0;
   const penaltyScore = clamp(1 - (0.7 * franchiseLikely + 0.5 * negScore));
 
+  const strongKeywordCount = countMatches(allText, STRONG_BONUS_PATTERNS);
+  const regularKeywordCount = countMatches(allText, REGULAR_BONUS_PATTERNS);
+  const strongKeywordPoint = Math.min(15, strongKeywordCount * 3);
+  const regularKeywordPoint = regularKeywordCount * 2;
+  const agePoint =
+    oldestReviewAgeYears >= 30 ? 30 : oldestReviewAgeYears >= 20 ? 20 : oldestReviewAgeYears >= 10 ? 10 : 0;
+
   const nopoScore = clamp(
     0.4 * timelineScore +
       0.25 * regularsTextScore +
@@ -198,6 +212,11 @@ export function computeNopoScore(input: NopoInput): NopoResult {
       posCount,
       negCount,
       franchiseLikely,
+      agePoint,
+      strongKeywordCount,
+      regularKeywordCount,
+      strongKeywordPoint,
+      regularKeywordPoint,
     },
   };
 }

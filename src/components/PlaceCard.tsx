@@ -27,19 +27,15 @@ type Props = {
   distanceKm: number | null;
   distanceBonus: number;
   scoreDetail: {
-    saved: number;
-    revisit: number;
-    tags: number;
+    age: number;
+    strongKeyword: number;
+    regularKeyword: number;
     distance: number;
     adPenalty: number;
     promoPenalty: number;
-    rankBoost: number;
-    commentRank: number;
-    blogVolume: number;
   };
   onAdSignal: (key: string, suspiciousCount: number) => void;
   onPromoSignal: (key: string, eventCount: number) => void;
-  onBlogVolumeBonus: (key: string, bonus: number) => void;
   onNopoUpdate: (key: string, result: NopoResult) => void;
   onHotplaceUpdate: (key: string, result: HotplaceScoreResult) => void;
   sameNameCount: number;
@@ -106,7 +102,6 @@ export default function PlaceCard({
   scoreDetail,
   onAdSignal,
   onPromoSignal,
-  onBlogVolumeBonus,
   onNopoUpdate,
   onHotplaceUpdate,
   sameNameCount,
@@ -150,7 +145,6 @@ export default function PlaceCard({
           setBlogs([]);
           onAdSignal(key, 0);
           onPromoSignal(key, 0);
-          onBlogVolumeBonus(key, 0);
           return;
         }
         const list: NaverBlogItem[] = (Array.isArray(data?.items) ? data.items : []).slice(0, 3);
@@ -165,13 +159,6 @@ export default function PlaceCard({
             })),
           ),
         );
-
-        const total = Number(data?.total ?? 0);
-        let volumeBonus = 0;
-        if (total >= 500) volumeBonus = 3;
-        else if (total >= 150) volumeBonus = 2;
-        else if (total >= 50) volumeBonus = 1;
-        onBlogVolumeBonus(key, volumeBonus);
 
         const suspiciousCount = list.filter((b: NaverBlogItem) => {
           const merged = `${b.title || ""} ${b.description || ""}`;
@@ -198,7 +185,6 @@ export default function PlaceCard({
         if (mounted) setBlogs([]);
         onAdSignal(key, 0);
         onPromoSignal(key, 0);
-        onBlogVolumeBonus(key, 0);
         onNopoUpdate(
           key,
           computeNopoScore({
@@ -222,7 +208,6 @@ export default function PlaceCard({
     key,
     onAdSignal,
     onPromoSignal,
-    onBlogVolumeBonus,
     onNopoUpdate,
     onHotplaceUpdate,
     sameNameCount,
@@ -360,13 +345,10 @@ export default function PlaceCard({
           flexWrap: "wrap",
         }}
       >
-        <span>찜 {scoreDetail.saved}/5</span>
-        <span>재방문 {scoreDetail.revisit}/3</span>
-        <span>태그 {scoreDetail.tags}/5</span>
+        <span>업력 {scoreDetail.age}/30</span>
+        <span>현지키워드 {scoreDetail.strongKeyword}/15</span>
+        <span>노포키워드 {scoreDetail.regularKeyword}/20</span>
         <span>거리 {scoreDetail.distance}/2</span>
-        <span>검색순위 {scoreDetail.rankBoost}/6</span>
-        <span>comment {scoreDetail.commentRank}/4</span>
-        <span>후기량 {scoreDetail.blogVolume}/3</span>
         <span>광고감점 -{scoreDetail.adPenalty}</span>
         <span>이벤트감점 -{scoreDetail.promoPenalty}</span>
       </div>

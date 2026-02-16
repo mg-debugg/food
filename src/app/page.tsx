@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import PlaceCard from "../components/PlaceCard";
@@ -9,11 +9,8 @@ import { computeNopoScore, type NopoResult } from "../lib/nopo";
 import { getTopHotplace, type HotplaceScoreResult } from "../lib/hotplace";
 
 type Region = "수원" | "여수" | "대구";
-type SortMode = "local" | "random" | "comment";
-type CategoryMode = "전체" | "한식" | "중식" | "일식" | "양식" | "카페" | "술집";
 
 const REGIONS: Region[] = ["수원", "여수", "대구"];
-const CATEGORIES: CategoryMode[] = ["전체", "한식", "중식", "일식", "양식", "카페", "술집"];
 
 export default function Page() {
   const [query, setQuery] = useState("");
@@ -22,18 +19,15 @@ export default function Page() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [category, setCategory] = useState<CategoryMode>("전체");
-  const [sortMode, setSortMode] = useState<SortMode>("local");
   const [nopoMode, setNopoMode] = useState(false);
   const [hotplaceMode, setHotplaceMode] = useState(false);
 
   const [metaMap, setMetaMap] = useState<Record<string, PlaceMeta>>({});
   const [adSignalMap, setAdSignalMap] = useState<Record<string, number>>({});
   const [promoSignalMap, setPromoSignalMap] = useState<Record<string, number>>({});
-  const [commentRankBonusMap, setCommentRankBonusMap] = useState<Record<string, number>>({});
-  const [blogVolumeBonusMap, setBlogVolumeBonusMap] = useState<Record<string, number>>({});
   const [nopoMap, setNopoMap] = useState<Record<string, NopoResult>>({});
   const [hotplaceMap, setHotplaceMap] = useState<Record<string, HotplaceScoreResult>>({});
+
   const [useDistanceBonus, setUseDistanceBonus] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -87,13 +81,6 @@ export default function Page() {
     });
   }, []);
 
-  const updateBlogVolumeBonus = useCallback((key: string, bonus: number) => {
-    setBlogVolumeBonusMap((prev) => {
-      if ((prev[key] ?? 0) === bonus) return prev;
-      return { ...prev, [key]: bonus };
-    });
-  }, []);
-
   const updateNopo = useCallback((key: string, result: NopoResult) => {
     setNopoMap((prev) => {
       const old = prev[key];
@@ -128,10 +115,7 @@ export default function Page() {
     setLocationError(null);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setUserLocation({
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude,
-        });
+        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
         setLocating(false);
       },
       () => {
@@ -149,52 +133,20 @@ export default function Page() {
     setLoading(true);
     setError(null);
     try {
-      const sortParam = sortMode === "comment" ? "comment" : "random";
       const params = new URLSearchParams({
         query: q,
         region,
         display: "10",
         start: "1",
-        sort: sortParam,
+        sort: "random",
       });
 
       const res = await fetch(`/api/naver/local?${params.toString()}`);
       const data = await res.json().catch(() => null);
-      if (!res.ok) {
-        throw new Error(data?.error || "API error");
-      }
+      if (!res.ok) throw new Error(data?.error || "API error");
 
       const nextItems: NaverLocalItem[] = Array.isArray(data?.items) ? data.items : [];
       setItems(nextItems);
-
-      if (sortMode === "local") {
-        const commentParams = new URLSearchParams({
-          query: q,
-          region,
-          display: "10",
-          start: "1",
-          sort: "comment",
-        });
-        const commentRes = await fetch(`/api/naver/local?${commentParams.toString()}`);
-        const commentData = await commentRes.json().catch(() => null);
-        if (commentRes.ok && Array.isArray(commentData?.items)) {
-          const map: Record<string, number> = {};
-          commentData.items.forEach((it: NaverLocalItem, idx: number) => {
-            const k = placeKey(it);
-            let bonus = 0;
-            if (idx === 0) bonus = 4;
-            else if (idx === 1) bonus = 3;
-            else if (idx === 2) bonus = 2;
-            else if (idx <= 4) bonus = 1;
-            map[k] = bonus;
-          });
-          setCommentRankBonusMap(map);
-        } else {
-          setCommentRankBonusMap({});
-        }
-      } else {
-        setCommentRankBonusMap({});
-      }
     } catch (e: any) {
       setError(String(e?.message ?? e));
     } finally {
@@ -214,17 +166,10 @@ export default function Page() {
       const y = Number.parseFloat(it.mapy || "");
       if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
       const asScaled = { lng: x / 1e7, lat: y / 1e7 };
-      if (
-        asScaled.lat >= 30 &&
-        asScaled.lat <= 45 &&
-        asScaled.lng >= 120 &&
-        asScaled.lng <= 135
-      ) {
+      if (asScaled.lat >= 30 && asScaled.lat <= 45 && asScaled.lng >= 120 && asScaled.lng <= 135) {
         return asScaled;
       }
-      if (y >= 30 && y <= 45 && x >= 120 && x <= 135) {
-        return { lat: y, lng: x };
-      }
+      if (y >= 30 && y <= 45 && x >= 120 && x <= 135) return { lat: y, lng: x };
       return null;
     }
 
@@ -254,11 +199,7 @@ export default function Page() {
     const others = items.filter((it) => !hasRegion(it));
     if (prefer.length > 0) list = [...prefer, ...others];
 
-    if (category !== "전체") {
-      list = list.filter((it) => (it.category || "").includes(category));
-    }
-
-    const enriched = list.map((it, idx) => {
+    const enriched = list.map((it) => {
       const key = placeKey(it);
       const meta =
         metaMap[key] ??
@@ -268,40 +209,24 @@ export default function Page() {
           tags: [],
           updatedAt: 0,
         } satisfies PlaceMeta);
-      const rankBoost = Math.max(0, 6 - idx);
-      const commentRankBoost = commentRankBonusMap[key] ?? 0;
-      const blogVolumeBoost = blogVolumeBonusMap[key] ?? 0;
+
       const adSignals = adSignalMap[key] ?? 0;
       const promoSignals = promoSignalMap[key] ?? 0;
       const adPenalty = Math.min(3, adSignals);
       const promoPenalty = Math.min(2, promoSignals);
+
       const coord = parseNaverCoords(it);
       const distance =
         useDistanceBonus && userLocation && coord
           ? distanceKm(userLocation, { lat: coord.lat, lng: coord.lng })
           : null;
       const distanceBonus = distance == null ? 0 : getDistanceBonus(distance);
-      const savedScore = meta.saved ? 5 : 0;
-      const revisitScore = Math.min(3, meta.revisitCount);
-      const tagScore = Math.min(5, meta.tags.length);
-      const scoreMax = 28;
-      const baseScore =
-        savedScore +
-        revisitScore +
-        tagScore +
-        distanceBonus +
-        rankBoost +
-        commentRankBoost +
-        blogVolumeBoost;
-      const score = Math.max(0, Math.min(scoreMax, baseScore - adPenalty - promoPenalty));
+
       const normTitle = (it.title || "").trim().toLowerCase();
       const sameNameCount = sameNameCountMap[normTitle] ?? 1;
-      const nopoDefault = computeNopoScore({
-        name: it.title,
-        sameNameCount,
-        reviews: [],
-      });
+      const nopoDefault = computeNopoScore({ name: it.title, sameNameCount, reviews: [] });
       const nopo = nopoMap[key] ?? nopoDefault;
+
       const hotplace =
         hotplaceMap[key] ??
         ({
@@ -312,9 +237,24 @@ export default function Page() {
           totalReviewCount: 0,
           multiplier: 1,
         } satisfies HotplaceScoreResult);
-      const totalNorm = score / Math.max(1, scoreMax);
+
+      const agePoint = nopo.metrics.agePoint;
+      const strongKeywordPoint = nopo.metrics.strongKeywordPoint;
+      const regularKeywordPoint = Math.min(20, nopo.metrics.regularKeywordPoint);
+
+      const scoreMax = 67;
+      const score = Math.max(
+        0,
+        Math.min(
+          scoreMax,
+          agePoint + strongKeywordPoint + regularKeywordPoint + distanceBonus - adPenalty - promoPenalty,
+        ),
+      );
+
+      const totalNorm = score / scoreMax;
       const distanceNorm = useDistanceBonus ? distanceBonus / 2 : 0.5;
       const hybridScore = 0.55 * nopo.nopoScore + 0.25 * totalNorm + 0.2 * distanceNorm;
+
       return {
         it,
         key,
@@ -335,15 +275,12 @@ export default function Page() {
         distance,
         distanceBonus,
         scoreDetail: {
-          saved: savedScore,
-          revisit: revisitScore,
-          tags: tagScore,
+          age: agePoint,
+          strongKeyword: strongKeywordPoint,
+          regularKeyword: regularKeywordPoint,
           distance: distanceBonus,
           adPenalty,
           promoPenalty,
-          rankBoost,
-          commentRank: commentRankBoost,
-          blogVolume: blogVolumeBoost,
         },
       };
     });
@@ -357,7 +294,7 @@ export default function Page() {
       );
     } else if (nopoMode) {
       enriched.sort((a, b) => b.hybridScore - a.hybridScore || b.nopoScore - a.nopoScore || b.score - a.score);
-    } else if (sortMode === "local") {
+    } else {
       enriched.sort((a, b) => b.score - a.score || b.meta.updatedAt - a.meta.updatedAt);
     }
 
@@ -365,17 +302,13 @@ export default function Page() {
   }, [
     items,
     region,
-    category,
-    sortMode,
     metaMap,
     adSignalMap,
     promoSignalMap,
-    commentRankBonusMap,
-    blogVolumeBonusMap,
     nopoMap,
     hotplaceMap,
-    nopoMode,
     hotplaceMode,
+    nopoMode,
     useDistanceBonus,
     userLocation,
   ]);
@@ -480,26 +413,8 @@ export default function Page() {
             >
               검색
             </button>
-            {useDistanceBonus ? (
-              <button
-                onClick={requestLocation}
-                disabled={locating}
-                style={{
-                  height: 46,
-                  padding: "0 12px",
-                  borderRadius: 14,
-                  border: "1px solid #d1d5db",
-                  background: "#fff",
-                  color: "#111827",
-                  fontWeight: 700,
-                  opacity: locating ? 0.7 : 1,
-                  cursor: locating ? "wait" : "pointer",
-                }}
-              >
-                {locating ? "위치 확인중" : "위치"}
-              </button>
-            ) : null}
           </div>
+
           <div
             style={{
               display: "inline-flex",
@@ -516,7 +431,11 @@ export default function Page() {
               id="distance-bonus-toggle"
               type="checkbox"
               checked={useDistanceBonus}
-              onChange={(e) => setUseDistanceBonus(e.target.checked)}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setUseDistanceBonus(next);
+                if (next) requestLocation();
+              }}
             />
             <label
               htmlFor="distance-bonus-toggle"
@@ -525,6 +444,9 @@ export default function Page() {
               가까운 곳 우선 (위치 가점)
             </label>
           </div>
+          {useDistanceBonus && locating ? (
+            <div style={{ marginTop: -4, marginBottom: 10, fontSize: 12, color: "#4b5563" }}>위치 확인중...</div>
+          ) : null}
           {useDistanceBonus && locationError ? (
             <div style={{ marginTop: -4, marginBottom: 10, fontSize: 12, color: "#b91c1c" }}>
               {locationError}
@@ -536,48 +458,7 @@ export default function Page() {
             </div>
           ) : null}
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-            {CATEGORIES.map((c) => (
-              <button
-                key={c}
-                onClick={() => setCategory(c)}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 999,
-                  border: "1px solid #e5e7eb",
-                  background: category === c ? "#111827" : "#f9fafb",
-                  color: category === c ? "#fff" : "#374151",
-                  fontWeight: 800,
-                  fontSize: 12,
-                }}
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {([
-              { id: "local", label: "로컬점수" },
-              { id: "random", label: "네이버 random" },
-              { id: "comment", label: "네이버 comment" },
-            ] as const).map((s) => (
-              <button
-                key={s.id}
-                onClick={() => setSortMode(s.id)}
-                style={{
-                  padding: "6px 10px",
-                  borderRadius: 999,
-                  border: "1px solid #e5e7eb",
-                  background: sortMode === s.id ? "#111827" : "#ffffff",
-                  color: sortMode === s.id ? "#fff" : "#111827",
-                  fontWeight: 800,
-                  fontSize: 12,
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
             <button
               onClick={() =>
                 setNopoMode((v) => {
@@ -640,8 +521,7 @@ export default function Page() {
               fontWeight: 700,
             }}
           >
-            현재 Top 핫플: {topHotplace.name} · 지수 {topHotplace.score.hotplaceScore.toFixed(0)} ·
-            최근 3개월 비율 {topHotplace.score.recentRatioPercent.toFixed(0)}%
+            현재 Top 핫플: {topHotplace.name} · 지수 {topHotplace.score.hotplaceScore.toFixed(0)} · 최근 3개월 비율 {topHotplace.score.recentRatioPercent.toFixed(0)}%
           </div>
         ) : null}
 
@@ -655,10 +535,9 @@ export default function Page() {
               scoreMax,
               nopoScore,
               nopoEvidence,
-              hybridScore,
+              sameNameCount,
               hotplaceScore,
               hotplaceRatioPercent,
-              sameNameCount,
               adSignals,
               adPenalty,
               promoPenalty,
@@ -666,34 +545,33 @@ export default function Page() {
               distanceBonus,
               scoreDetail,
             }) => (
-            <PlaceCard
-              key={key}
-              item={it}
-              meta={meta}
-              score={score}
-              scoreMax={scoreMax}
-              nopoScore={nopoScore}
-              nopoEvidence={nopoEvidence}
-              isNopoMode={nopoMode}
-              hotplaceScore={hotplaceScore}
-              hotplaceRatioPercent={hotplaceRatioPercent}
-              isHotplaceMode={hotplaceMode}
-              isTopHotplace={topHotplace?.name === it.title}
-              region={region}
-              adSignals={adSignals}
-              adPenalty={adPenalty}
-              promoPenalty={promoPenalty}
-              distanceKm={distance}
-              distanceBonus={distanceBonus}
-              scoreDetail={scoreDetail}
-              onAdSignal={updateAdSignal}
-              onPromoSignal={updatePromoSignal}
-              onBlogVolumeBonus={updateBlogVolumeBonus}
-              onNopoUpdate={updateNopo}
-              onHotplaceUpdate={updateHotplace}
-              sameNameCount={sameNameCount}
-              onUpdate={updateMeta}
-            />
+              <PlaceCard
+                key={key}
+                item={it}
+                meta={meta}
+                score={score}
+                scoreMax={scoreMax}
+                nopoScore={nopoScore}
+                nopoEvidence={nopoEvidence}
+                isNopoMode={nopoMode}
+                hotplaceScore={hotplaceScore}
+                hotplaceRatioPercent={hotplaceRatioPercent}
+                isHotplaceMode={hotplaceMode}
+                isTopHotplace={topHotplace?.name === it.title}
+                region={region}
+                adSignals={adSignals}
+                adPenalty={adPenalty}
+                promoPenalty={promoPenalty}
+                distanceKm={distance}
+                distanceBonus={distanceBonus}
+                scoreDetail={scoreDetail}
+                onAdSignal={updateAdSignal}
+                onPromoSignal={updatePromoSignal}
+                onNopoUpdate={updateNopo}
+                onHotplaceUpdate={updateHotplace}
+                sameNameCount={sameNameCount}
+                onUpdate={updateMeta}
+              />
             ),
           )}
         </div>
