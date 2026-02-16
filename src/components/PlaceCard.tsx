@@ -4,25 +4,35 @@ import { useEffect, useMemo, useState } from "react";
 import type { NaverBlogItem, NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 
+type Region = "수원" | "여수";
+
 type Props = {
   item: NaverLocalItem;
   meta: PlaceMeta;
   score: number;
+  region: Region;
   onUpdate: (key: string, nextMeta: PlaceMeta) => void;
 };
 
 const TAGS = ["혼밥", "데이트", "가족", "회식", "가성비"] as const;
 
-export default function PlaceCard({ item, meta, score, onUpdate }: Props) {
+function extractSigungu(address: string): string {
+  if (!address) return "";
+  const parts = address.split(/\s+/).filter(Boolean);
+  const sigungu = parts.filter(
+    (p) => p.endsWith("시") || p.endsWith("군") || p.endsWith("구"),
+  );
+  return sigungu.slice(0, 3).join(" ");
+}
+
+export default function PlaceCard({ item, meta, score, region, onUpdate }: Props) {
   const key = placeKey(item);
   const [blogs, setBlogs] = useState<NaverBlogItem[]>([]);
   const [loadingBlogs, setLoadingBlogs] = useState(false);
 
   const addr = item.roadAddress || item.address || "";
-  const mapQuery = useMemo(
-    () => `${item.title} ${item.roadAddress || item.address || ""}`.trim(),
-    [item.title, item.roadAddress, item.address],
-  );
+  const sigungu = useMemo(() => extractSigungu(addr), [addr]);
+  const mapQuery = `${item.title} ${sigungu || region}`.trim();
   const naverMapLink = `https://map.naver.com/v5/search/${encodeURIComponent(mapQuery)}`;
 
   function commit(next: PlaceMeta) {
@@ -40,9 +50,13 @@ export default function PlaceCard({ item, meta, score, onUpdate }: Props) {
     const run = async () => {
       setLoadingBlogs(true);
       try {
-        const res = await fetch(
-          `/api/naver/blog?query=${encodeURIComponent(item.title)}&display=3&start=1`,
-        );
+        const params = new URLSearchParams({
+          query: item.title,
+          region,
+          display: "3",
+          start: "1",
+        });
+        const res = await fetch(`/api/naver/blog?${params.toString()}`);
         const data = await res.json().catch(() => null);
         if (!mounted) return;
         if (!res.ok) {
@@ -59,7 +73,7 @@ export default function PlaceCard({ item, meta, score, onUpdate }: Props) {
     return () => {
       mounted = false;
     };
-  }, [item.title]);
+  }, [item.title, region]);
 
   return (
     <div

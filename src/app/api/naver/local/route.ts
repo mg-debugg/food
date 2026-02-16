@@ -1,5 +1,8 @@
 export const runtime = "nodejs";
 
+const ALLOWED_REGIONS = ["수원", "여수"] as const;
+type Region = (typeof ALLOWED_REGIONS)[number];
+
 function stripHtmlTags(s: string): string {
   if (!s) return "";
   return s.replace(/<[^>]*>/g, "");
@@ -10,6 +13,11 @@ export async function GET(req: Request) {
   const sp = url.searchParams;
 
   const query = (sp.get("query") ?? "").trim();
+  const regionRaw = (sp.get("region") ?? "수원").trim();
+  const region: Region = ALLOWED_REGIONS.includes(regionRaw as Region)
+    ? (regionRaw as Region)
+    : "수원";
+
   const display = sp.get("display") ?? "20";
   const start = sp.get("start") ?? "1";
   const sortRaw = (sp.get("sort") ?? "random").toLowerCase();
@@ -34,7 +42,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const finalQuery = `수원 ${query}`;
+  const finalQuery = `${region} ${query}`;
   const endpoint = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(
     finalQuery,
   )}&display=${encodeURIComponent(display)}&start=${encodeURIComponent(

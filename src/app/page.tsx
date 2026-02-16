@@ -6,13 +6,16 @@ import type { NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 import { computeLocalScore, loadMeta, saveMeta } from "../lib/storage";
 
+type Region = "수원" | "여수";
 type SortMode = "local" | "random" | "comment";
 type CategoryMode = "전체" | "한식" | "중식" | "일식" | "양식" | "카페" | "술집";
 
+const REGIONS: Region[] = ["수원", "여수"];
 const CATEGORIES: CategoryMode[] = ["전체", "한식", "중식", "일식", "양식", "카페", "술집"];
 
 export default function Page() {
   const [query, setQuery] = useState("");
+  const [region, setRegion] = useState<Region>("수원");
   const [items, setItems] = useState<NaverLocalItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +69,7 @@ export default function Page() {
       const sortParam = sortMode === "comment" ? "comment" : "random";
       const params = new URLSearchParams({
         query: q,
+        region,
         display: "20",
         start: "1",
         sort: sortParam,
@@ -87,12 +91,12 @@ export default function Page() {
   }
 
   const prepared = useMemo(() => {
-    // Prefer "수원" address items, but if none exist keep original.
-    const hasSuwon = (it: NaverLocalItem) =>
-      (it.address || "").includes("수원") || (it.roadAddress || "").includes("수원");
+    // Prefer items whose address contains selected region.
+    const hasRegion = (it: NaverLocalItem) =>
+      (it.address || "").includes(region) || (it.roadAddress || "").includes(region);
 
     let list = items;
-    const prefer = items.filter(hasSuwon);
+    const prefer = items.filter(hasRegion);
     if (prefer.length > 0) list = prefer;
 
     if (category !== "전체") {
@@ -118,7 +122,7 @@ export default function Page() {
     }
 
     return enriched;
-  }, [items, category, sortMode, metaMap]);
+  }, [items, region, category, sortMode, metaMap]);
 
   return (
     <div
@@ -129,8 +133,28 @@ export default function Page() {
     >
       <div style={{ maxWidth: 960, margin: "0 auto", padding: 16 }}>
         <h1 style={{ fontSize: 28, fontWeight: 900, margin: "18px 0 12px" }}>
-          수원 로컬 맛집 찾기 (MVP)
+          로컬 맛집 찾기 (MVP)
         </h1>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          {REGIONS.map((r) => (
+            <button
+              key={r}
+              onClick={() => setRegion(r)}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: "1px solid #e5e7eb",
+                background: region === r ? "#111827" : "#f3f4f6",
+                color: region === r ? "#fff" : "#111827",
+                fontWeight: 800,
+                fontSize: 12,
+              }}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
 
         <div
           style={{
@@ -146,7 +170,7 @@ export default function Page() {
             onKeyDown={(e) => {
               if (e.key === "Enter") search();
             }}
-            placeholder="검색어를 입력하세요 (예: 곱창)"
+            placeholder={`검색어를 입력하세요 (예: 곱창)`}
             style={{
               flex: 1,
               height: 44,
@@ -225,7 +249,8 @@ export default function Page() {
 
         {!loading && !error && items.length === 0 ? (
           <div style={{ padding: 10, color: "#6b7280" }}>
-            검색어를 입력하고 검색해 주세요. (서버에서 자동으로 &quot;수원 &quot; prefix가 붙습니다)
+            검색어를 입력하고 검색해 주세요. (서버에서 자동으로 &quot;{region} &quot; prefix가
+            붙습니다)
           </div>
         ) : null}
 
@@ -240,6 +265,7 @@ export default function Page() {
               item={it}
               meta={meta}
               score={score}
+              region={region}
               onUpdate={updateMeta}
             />
           ))}
