@@ -14,8 +14,7 @@ type Props = {
   scoreMax: number;
   searchIndexScore: number;
   adEventPenalty: number;
-  hotplaceScore: number;
-  hotplaceRatioPercent: number;
+  penaltyDetectedCount: number;
   hotplaceRecentCount: number;
   isHotNow: boolean;
   region: Region;
@@ -34,9 +33,12 @@ function extractSigungu(address: string): string {
   return sigungu.slice(0, 3).join(" ");
 }
 
-function hasPenaltyPhrase(s: string): boolean {
-  const text = (s || "").toLowerCase();
-  return PENALTY_PATTERNS.some((pattern) => pattern.test(text));
+function countPenaltyPhrases(s: string): number {
+  const text = s || "";
+  return PENALTY_PATTERNS.reduce((acc, pattern) => {
+    const matches = text.match(new RegExp(pattern.source, "gi"));
+    return acc + (matches?.length ?? 0);
+  }, 0);
 }
 
 export default function PlaceCard({
@@ -46,8 +48,7 @@ export default function PlaceCard({
   scoreMax,
   searchIndexScore,
   adEventPenalty,
-  hotplaceScore,
-  hotplaceRatioPercent,
+  penaltyDetectedCount,
   hotplaceRecentCount,
   isHotNow,
   region,
@@ -110,7 +111,7 @@ export default function PlaceCard({
         );
 
         const merged = list.map((b) => `${b.title || ""} ${b.description || ""}`).join(" ");
-        onPenaltySignal(key, hasPenaltyPhrase(merged) ? 1 : 0);
+        onPenaltySignal(key, countPenaltyPhrases(merged));
       } catch {
         if (mounted) setBlogs([]);
         onPenaltySignal(key, 0);
@@ -213,10 +214,7 @@ export default function PlaceCard({
           <div style={{ fontWeight: 900, fontSize: 22, color: "#0f172a" }}>
             {score.toFixed(1)}/{scoreMax.toFixed(1)}점
           </div>
-          <div style={{ fontSize: 12, color: "#6b7280" }}>노포 점수(기본)</div>
-          <div style={{ marginTop: 3, fontSize: 11, color: "#b45309", fontWeight: 800 }}>
-            핫플지수 {hotplaceScore.toFixed(0)} ({hotplaceRatioPercent.toFixed(0)}%)
-          </div>
+          <div style={{ fontSize: 12, color: "#6b7280" }}>점수</div>
         </div>
       </div>
 
@@ -353,6 +351,9 @@ export default function PlaceCard({
       <div style={{ marginTop: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: "#374151" }}>최신 블로그 후기</div>
+          <div style={{ fontSize: 11, color: penaltyDetectedCount > 0 ? "#b91c1c" : "#6b7280", fontWeight: 700 }}>
+            광고/이벤트 단어 탐지 {penaltyDetectedCount}건
+          </div>
         </div>
         {loadingBlogs ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>불러오는 중...</div>

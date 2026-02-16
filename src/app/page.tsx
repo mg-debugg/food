@@ -8,7 +8,6 @@ import { loadMeta, saveMeta } from "../lib/storage";
 import { getTopHotplace, type HotplaceScoreResult } from "../lib/hotplace";
 
 type Region = "수원" | "여수" | "대구";
-type ViewMode = "base" | "hot";
 
 const REGIONS: Region[] = ["수원", "여수", "대구"];
 
@@ -18,7 +17,7 @@ export default function Page() {
   const [items, setItems] = useState<NaverLocalItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("base");
+  const [hotMode, setHotMode] = useState(false);
 
   const [metaMap, setMetaMap] = useState<Record<string, PlaceMeta>>({});
   const [penaltySignalMap, setPenaltySignalMap] = useState<Record<string, number>>({});
@@ -154,6 +153,7 @@ export default function Page() {
         scoreMax,
         searchIndexScore,
         adEventPenalty,
+        penaltyDetectedCount: penaltySignalMap[key] ?? 0,
         hotplaceScore: hotplace.hotplaceScore,
         hotplaceRatioPercent: hotplace.recentRatioPercent,
         hotplaceRecentCount: hotplace.recent3mCount,
@@ -162,7 +162,7 @@ export default function Page() {
       };
     });
 
-    if (viewMode === "hot") {
+    if (hotMode) {
       const hotOnly = enriched.filter((e) => e.isHotNow);
       hotOnly.sort(
         (a, b) =>
@@ -175,7 +175,7 @@ export default function Page() {
 
     enriched.sort((a, b) => b.score - a.score || b.meta.updatedAt - a.meta.updatedAt);
     return enriched;
-  }, [items, region, metaMap, penaltySignalMap, hotplaceMap, viewMode]);
+  }, [items, region, metaMap, penaltySignalMap, hotplaceMap, hotMode]);
 
   const topHotplace = useMemo(
     () =>
@@ -283,32 +283,18 @@ export default function Page() {
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
-              onClick={() => setViewMode("base")}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 999,
-                border: "1px solid #0f766e",
-                background: viewMode === "base" ? "#0f766e" : "#ffffff",
-                color: viewMode === "base" ? "#fff" : "#0f766e",
-                fontWeight: 800,
-                fontSize: 12,
-              }}
-            >
-              기본(노포맛집)
-            </button>
-            <button
-              onClick={() => setViewMode("hot")}
+              onClick={() => setHotMode((v) => !v)}
               style={{
                 padding: "6px 10px",
                 borderRadius: 999,
                 border: "1px solid #b45309",
-                background: viewMode === "hot" ? "#b45309" : "#ffffff",
-                color: viewMode === "hot" ? "#fff" : "#b45309",
+                background: hotMode ? "#b45309" : "#ffffff",
+                color: hotMode ? "#fff" : "#b45309",
                 fontWeight: 800,
                 fontSize: 12,
               }}
             >
-              핫플
+              핫플 {hotMode ? "ON" : "OFF"}
             </button>
           </div>
         </div>
@@ -316,7 +302,7 @@ export default function Page() {
         {loading ? <div style={{ padding: 12, color: "#6b7280" }}>검색중...</div> : null}
         {error ? <div style={{ padding: 12, color: "#b91c1c" }}>{error}</div> : null}
 
-        {!loading && !error && viewMode === "hot" && topHotplace ? (
+        {!loading && !error && hotMode && topHotplace ? (
           <div
             style={{
               marginTop: 10,
@@ -347,8 +333,7 @@ export default function Page() {
               scoreMax,
               searchIndexScore,
               adEventPenalty,
-              hotplaceScore,
-              hotplaceRatioPercent,
+              penaltyDetectedCount,
               hotplaceRecentCount,
               isHotNow,
             }) => (
@@ -360,8 +345,7 @@ export default function Page() {
                 scoreMax={scoreMax}
                 searchIndexScore={searchIndexScore}
                 adEventPenalty={adEventPenalty}
-                hotplaceScore={hotplaceScore}
-                hotplaceRatioPercent={hotplaceRatioPercent}
+                penaltyDetectedCount={penaltyDetectedCount}
                 hotplaceRecentCount={hotplaceRecentCount}
                 isHotNow={isHotNow}
                 region={region}
