@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import PlaceCard from "../components/PlaceCard";
 import type { NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
-import { computeLocalScore, loadMeta, saveMeta } from "../lib/storage";
+import { loadMeta, saveMeta } from "../lib/storage";
 
 type Region = "수원" | "여수" | "대구";
 type SortMode = "local" | "random" | "comment";
@@ -157,10 +157,8 @@ export default function Page() {
     }
 
     function getDistanceBonus(km: number): number {
-      if (km <= 0.7) return 4;
-      if (km <= 1.5) return 3;
-      if (km <= 3) return 2;
-      if (km <= 5) return 1;
+      if (km <= 1.5) return 2;
+      if (km <= 4) return 1;
       return 0;
     }
 
@@ -188,13 +186,35 @@ export default function Page() {
         } satisfies PlaceMeta);
       const rankBoost = Math.max(0, 10 - idx);
       const adSignals = adSignalMap[key] ?? 0;
-      const adPenalty = adSignals > 0 ? Math.min(4, adSignals * 2) : 0;
+      const adPenalty = Math.min(3, adSignals);
       const coord = parseNaverCoords(it);
       const distance =
         userLocation && coord ? distanceKm(userLocation, { lat: coord.lat, lng: coord.lng }) : null;
       const distanceBonus = distance == null ? 0 : getDistanceBonus(distance);
-      const score = Math.max(0, computeLocalScore(meta) + rankBoost + distanceBonus - adPenalty);
-      return { it, key, meta, score, adSignals, adPenalty, distance, distanceBonus };
+      const savedScore = meta.saved ? 5 : 0;
+      const revisitScore = Math.min(3, meta.revisitCount);
+      const tagScore = Math.min(5, meta.tags.length);
+      const baseScore = savedScore + revisitScore + tagScore + distanceBonus;
+      const score = Math.max(0, Math.min(15, baseScore - adPenalty));
+      return {
+        it,
+        key,
+        meta,
+        score,
+        scoreMax: 15,
+        adSignals,
+        adPenalty,
+        distance,
+        distanceBonus,
+        scoreDetail: {
+          saved: savedScore,
+          revisit: revisitScore,
+          tags: tagScore,
+          distance: distanceBonus,
+          adPenalty,
+          rankBoost,
+        },
+      };
     });
 
     if (sortMode === "local") {
@@ -257,7 +277,7 @@ export default function Page() {
               onKeyDown={(e) => {
                 if (e.key === "Enter") search();
               }}
-              placeholder="메뉴를 입력하세요 (예: 곱창, 파스타)"
+              placeholder="메뉴를 입력하세요 (예 : 국밥)"
               style={{
                 flex: 1,
                 height: 46,
@@ -301,7 +321,7 @@ export default function Page() {
                 cursor: locating ? "wait" : "pointer",
               }}
             >
-              {locating ? "위치 확인중" : userLocation ? "내 위치 갱신" : "내 위치 사용"}
+              {locating ? "위치 확인중" : "위치"}
             </button>
           </div>
           {locationError ? (
@@ -363,32 +383,41 @@ export default function Page() {
         {loading ? <div style={{ padding: 12, color: "#6b7280" }}>검색중...</div> : null}
         {error ? <div style={{ padding: 12, color: "#b91c1c" }}>{error}</div> : null}
 
-        {!loading && !error && items.length === 0 ? (
-          <div style={{ padding: 12, color: "#6b7280" }}>
-            메뉴 검색을 시작해 주세요. 서버에서 자동으로 "{region} " 접두사를 붙입니다.
-          </div>
-        ) : null}
-
         {!loading && !error && items.length > 0 && prepared.length === 0 ? (
           <div style={{ padding: 12, color: "#6b7280" }}>결과가 없습니다.</div>
         ) : null}
 
         <div style={{ marginTop: 14 }}>
-          {prepared.map(({ it, key, meta, score, adSignals, adPenalty, distance, distanceBonus }) => (
+          {prepared.map(
+            ({
+              it,
+              key,
+              meta,
+              score,
+              scoreMax,
+              adSignals,
+              adPenalty,
+              distance,
+              distanceBonus,
+              scoreDetail,
+            }) => (
             <PlaceCard
               key={key}
               item={it}
               meta={meta}
               score={score}
+              scoreMax={scoreMax}
               region={region}
               adSignals={adSignals}
               adPenalty={adPenalty}
               distanceKm={distance}
               distanceBonus={distanceBonus}
+              scoreDetail={scoreDetail}
               onAdSignal={updateAdSignal}
               onUpdate={updateMeta}
             />
-          ))}
+            ),
+          )}
         </div>
       </div>
     </div>

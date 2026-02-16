@@ -10,11 +10,20 @@ type Props = {
   item: NaverLocalItem;
   meta: PlaceMeta;
   score: number;
+  scoreMax: number;
   region: Region;
   adSignals: number;
   adPenalty: number;
   distanceKm: number | null;
   distanceBonus: number;
+  scoreDetail: {
+    saved: number;
+    revisit: number;
+    tags: number;
+    distance: number;
+    adPenalty: number;
+    rankBoost: number;
+  };
   onAdSignal: (key: string, suspiciousCount: number) => void;
   onUpdate: (key: string, nextMeta: PlaceMeta) => void;
 };
@@ -48,11 +57,13 @@ export default function PlaceCard({
   item,
   meta,
   score,
+  scoreMax,
   region,
   adSignals,
   adPenalty,
   distanceKm,
   distanceBonus,
+  scoreDetail,
   onAdSignal,
   onUpdate,
 }: Props) {
@@ -203,7 +214,9 @@ export default function PlaceCard({
         </div>
 
         <div style={{ textAlign: "right", flexShrink: 0, minWidth: 74 }}>
-          <div style={{ fontWeight: 900, fontSize: 24, color: "#0f172a" }}>{score}</div>
+          <div style={{ fontWeight: 900, fontSize: 22, color: "#0f172a" }}>
+            {score}/{scoreMax}점
+          </div>
           <div style={{ fontSize: 12, color: "#6b7280" }}>로컬 점수</div>
           {distanceKm != null ? (
             <div style={{ marginTop: 5, fontSize: 11, color: "#2563eb", fontWeight: 800 }}>
@@ -287,6 +300,27 @@ export default function PlaceCard({
             네이버 지도 열기
           </button>
         </a>
+      </div>
+
+      <div
+        style={{
+          marginTop: 10,
+          padding: "8px 10px",
+          borderRadius: 10,
+          border: "1px solid #e5e7eb",
+          background: "#f9fafb",
+          fontSize: 11,
+          color: "#4b5563",
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <span>찜 {scoreDetail.saved}</span>
+        <span>재방문 {scoreDetail.revisit}</span>
+        <span>태그 {scoreDetail.tags}</span>
+        <span>거리 {scoreDetail.distance}</span>
+        <span>광고감점 -{scoreDetail.adPenalty}</span>
       </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
