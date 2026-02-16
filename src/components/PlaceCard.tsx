@@ -1,6 +1,7 @@
 "use client";
 
-import type { NaverLocalItem, PlaceMeta } from "../lib/types";
+import { useEffect, useMemo, useState } from "react";
+import type { NaverBlogItem, NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 
 type Props = {
@@ -14,8 +15,15 @@ const TAGS = ["혼밥", "데이트", "가족", "회식", "가성비"] as const;
 
 export default function PlaceCard({ item, meta, score, onUpdate }: Props) {
   const key = placeKey(item);
+  const [blogs, setBlogs] = useState<NaverBlogItem[]>([]);
+  const [loadingBlogs, setLoadingBlogs] = useState(false);
 
   const addr = item.roadAddress || item.address || "";
+  const mapQuery = useMemo(
+    () => `${item.title} ${item.roadAddress || item.address || ""}`.trim(),
+    [item.title, item.roadAddress, item.address],
+  );
+  const naverMapLink = `https://map.naver.com/v5/search/${encodeURIComponent(mapQuery)}`;
 
   function commit(next: PlaceMeta) {
     onUpdate(key, { ...next, updatedAt: Date.now() });
@@ -26,6 +34,32 @@ export default function PlaceCard({ item, meta, score, onUpdate }: Props) {
     const tags = on ? meta.tags.filter((t) => t !== tag) : [...meta.tags, tag];
     commit({ ...meta, tags });
   }
+
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      setLoadingBlogs(true);
+      try {
+        const res = await fetch(
+          `/api/naver/blog?query=${encodeURIComponent(item.title)}&display=3&start=1`,
+        );
+        const data = await res.json().catch(() => null);
+        if (!mounted) return;
+        if (!res.ok) {
+          setBlogs([]);
+          return;
+        }
+        const list = Array.isArray(data?.items) ? data.items : [];
+        setBlogs(list.slice(0, 3));
+      } finally {
+        if (mounted) setLoadingBlogs(false);
+      }
+    };
+    run();
+    return () => {
+      mounted = false;
+    };
+  }, [item.title]);
 
   return (
     <div
@@ -39,19 +73,11 @@ export default function PlaceCard({ item, meta, score, onUpdate }: Props) {
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.2 }}>
-            {item.title}
-          </div>
-          <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>
-            {item.category}
-          </div>
-          <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
-            {addr}
-          </div>
+          <div style={{ fontWeight: 800, fontSize: 16, lineHeight: 1.2 }}>{item.title}</div>
+          <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>{item.category}</div>
+          <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>{addr}</div>
           {item.telephone ? (
-            <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>
-              {item.telephone}
-            </div>
+            <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>{item.telephone}</div>
           ) : null}
         </div>
 
@@ -121,7 +147,7 @@ export default function PlaceCard({ item, meta, score, onUpdate }: Props) {
           </button>
         </div>
 
-        <a href={item.link} target="_blank" rel="noreferrer">
+        <a href={naverMapLink} target="_blank" rel="noreferrer">
           <button
             style={{
               padding: "6px 10px",
@@ -131,7 +157,7 @@ export default function PlaceCard({ item, meta, score, onUpdate }: Props) {
               fontWeight: 700,
             }}
           >
-            네이버 열기
+            네이버 지도 열기
           </button>
         </a>
       </div>
@@ -160,20 +186,29 @@ export default function PlaceCard({ item, meta, score, onUpdate }: Props) {
       </div>
 
       <div style={{ marginTop: 10 }}>
-        <textarea
-          value={meta.memo}
-          onChange={(e) => commit({ ...meta, memo: e.target.value })}
-          rows={3}
-          placeholder="메모를 입력하세요"
-          style={{
-            width: "100%",
-            resize: "vertical",
-            borderRadius: 10,
-            border: "1px solid #e5e7eb",
-            padding: 10,
-            outline: "none",
-          }}
-        />
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#374151", marginBottom: 6 }}>
+          최신 내돈내산 블로그 후기
+        </div>
+        {loadingBlogs ? (
+          <div style={{ fontSize: 12, color: "#6b7280" }}>불러오는 중...</div>
+        ) : blogs.length === 0 ? (
+          <div style={{ fontSize: 12, color: "#6b7280" }}>내돈내산 후기 링크가 없습니다.</div>
+        ) : (
+          <ul style={{ margin: 0, paddingLeft: 18 }}>
+            {blogs.map((b) => (
+              <li key={b.link} style={{ marginBottom: 4 }}>
+                <a
+                  href={b.link}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ fontSize: 13, color: "#0f172a" }}
+                >
+                  {b.title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

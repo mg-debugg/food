@@ -27,7 +27,6 @@ export function getOrInitMeta(
       saved: false,
       revisitCount: 0,
       tags: [],
-      memo: "",
       updatedAt: Date.now(),
     };
   }
@@ -37,4 +36,3 @@ export function getOrInitMeta(
 export function computeLocalScore(meta: PlaceMeta): number {
   return (meta.saved ? 5 : 0) + meta.revisitCount * 3 + meta.tags.length * 2;
 }
-

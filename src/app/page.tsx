@@ -38,7 +38,6 @@ export default function Page() {
             saved: false,
             revisitCount: 0,
             tags: [],
-            memo: "",
             updatedAt: Date.now(),
           };
           changed = true;
@@ -96,7 +95,6 @@ export default function Page() {
     const prefer = items.filter(hasSuwon);
     if (prefer.length > 0) list = prefer;
 
-    // Category filter: Naver "category" string contains the selected label.
     if (category !== "전체") {
       list = list.filter((it) => (it.category || "").includes(category));
     }
@@ -109,7 +107,6 @@ export default function Page() {
           saved: false,
           revisitCount: 0,
           tags: [],
-          memo: "",
           updatedAt: 0,
         } satisfies PlaceMeta);
       const score = computeLocalScore(meta);
@@ -168,7 +165,7 @@ export default function Page() {
               padding: "0 14px",
               borderRadius: 12,
               border: "1px solid #111827",
-              background: loading ? "#111827" : "#111827",
+              background: "#111827",
               color: "#fff",
               fontWeight: 800,
               opacity: loading || !query.trim() ? 0.6 : 1,
@@ -223,12 +220,12 @@ export default function Page() {
           ))}
         </div>
 
-        {loading ? <div style={{ padding: 10 }}>검색중…</div> : null}
+        {loading ? <div style={{ padding: 10 }}>검색중...</div> : null}
         {error ? <div style={{ padding: 10, color: "#b91c1c" }}>{error}</div> : null}
 
         {!loading && !error && items.length === 0 ? (
           <div style={{ padding: 10, color: "#6b7280" }}>
-            검색어를 입력하고 검색해 주세요. (서버에서 자동으로 “수원 ” prefix가 붙습니다)
+            검색어를 입력하고 검색해 주세요. (서버에서 자동으로 &quot;수원 &quot; prefix가 붙습니다)
           </div>
         ) : null}
 
@@ -251,3 +248,4 @@ export default function Page() {
     </div>
   );
 }
+

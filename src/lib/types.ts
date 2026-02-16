@@ -10,11 +10,18 @@ export type NaverLocalItem = {
   mapy: string;
 };
 
+export type NaverBlogItem = {
+  title: string;
+  link: string;
+  description: string;
+  bloggername: string;
+  bloggerlink: string;
+  postdate: string;
+};
+
 export type PlaceMeta = {
   saved: boolean;
   revisitCount: number;
   tags: string[];
-  memo: string;
   updatedAt: number;
 };
-
