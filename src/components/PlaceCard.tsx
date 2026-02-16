@@ -14,6 +14,7 @@ type Props = {
   region: Region;
   adSignals: number;
   adPenalty: number;
+  promoPenalty: number;
   distanceKm: number | null;
   distanceBonus: number;
   scoreDetail: {
@@ -22,9 +23,14 @@ type Props = {
     tags: number;
     distance: number;
     adPenalty: number;
+    promoPenalty: number;
     rankBoost: number;
+    commentRank: number;
+    blogVolume: number;
   };
   onAdSignal: (key: string, suspiciousCount: number) => void;
+  onPromoSignal: (key: string, eventCount: number) => void;
+  onBlogVolumeBonus: (key: string, bonus: number) => void;
   onUpdate: (key: string, nextMeta: PlaceMeta) => void;
 };
 
@@ -40,6 +46,15 @@ const AD_PATTERNS = [
   /유료\s*광고/,
   /업체로부터/,
 ] as const;
+const PROMO_PATTERNS = [
+  /영수증\s*리뷰/,
+  /리뷰\s*이벤트/,
+  /방문자\s*리뷰/,
+  /포토\s*리뷰/,
+  /쿠폰\s*증정/,
+  /서비스\s*제공/,
+  /리뷰\s*작성\s*시/,
+] as const;
 
 function extractSigungu(address: string): string {
   if (!address) return "";
@@ -53,6 +68,11 @@ function hasSponsoredPhrase(s: string): boolean {
   return AD_PATTERNS.some((pattern) => pattern.test(text));
 }
 
+function hasPromoPhrase(s: string): boolean {
+  const text = (s || "").toLowerCase();
+  return PROMO_PATTERNS.some((pattern) => pattern.test(text));
+}
+
 export default function PlaceCard({
   item,
   meta,
@@ -61,10 +81,13 @@ export default function PlaceCard({
   region,
   adSignals,
   adPenalty,
+  promoPenalty,
   distanceKm,
   distanceBonus,
   scoreDetail,
   onAdSignal,
+  onPromoSignal,
+  onBlogVolumeBonus,
   onUpdate,
 }: Props) {
   const key = placeKey(item);
@@ -104,16 +127,36 @@ export default function PlaceCard({
         if (!res.ok) {
           setBlogs([]);
           onAdSignal(key, 0);
+          onPromoSignal(key, 0);
+          onBlogVolumeBonus(key, 0);
           return;
         }
         const list = (Array.isArray(data?.items) ? data.items : []).slice(0, 3);
         setBlogs(list);
+
+        const total = Number(data?.total ?? 0);
+        let volumeBonus = 0;
+        if (total >= 500) volumeBonus = 3;
+        else if (total >= 150) volumeBonus = 2;
+        else if (total >= 50) volumeBonus = 1;
+        onBlogVolumeBonus(key, volumeBonus);
 
         const suspiciousCount = list.filter((b: NaverBlogItem) => {
           const merged = `${b.title || ""} ${b.description || ""}`;
           return hasSponsoredPhrase(merged);
         }).length;
         onAdSignal(key, suspiciousCount);
+
+        const promoCount = list.filter((b: NaverBlogItem) => {
+          const merged = `${b.title || ""} ${b.description || ""}`;
+          return hasPromoPhrase(merged);
+        }).length;
+        onPromoSignal(key, promoCount);
+      } catch {
+        if (mounted) setBlogs([]);
+        onAdSignal(key, 0);
+        onPromoSignal(key, 0);
+        onBlogVolumeBonus(key, 0);
       } finally {
         if (mounted) setLoadingBlogs(false);
       }
@@ -122,7 +165,7 @@ export default function PlaceCard({
     return () => {
       mounted = false;
     };
-  }, [item.title, region, key, onAdSignal]);
+  }, [item.title, region, key, onAdSignal, onPromoSignal, onBlogVolumeBonus]);
 
   useEffect(() => {
     let mounted = true;
@@ -228,7 +271,37 @@ export default function PlaceCard({
               광고감점 -{adPenalty}
             </div>
           ) : null}
+          {promoPenalty > 0 ? (
+            <div style={{ marginTop: 3, fontSize: 11, color: "#b91c1c", fontWeight: 800 }}>
+              이벤트감점 -{promoPenalty}
+            </div>
+          ) : null}
         </div>
+      </div>
+
+      <div
+        style={{
+          marginTop: 10,
+          padding: "8px 10px",
+          borderRadius: 10,
+          border: "1px solid #e5e7eb",
+          background: "#f9fafb",
+          fontSize: 11,
+          color: "#374151",
+          display: "flex",
+          gap: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <span>찜 {scoreDetail.saved}/5</span>
+        <span>재방문 {scoreDetail.revisit}/3</span>
+        <span>태그 {scoreDetail.tags}/5</span>
+        <span>거리 {scoreDetail.distance}/2</span>
+        <span>검색순위 {scoreDetail.rankBoost}/6</span>
+        <span>comment {scoreDetail.commentRank}/4</span>
+        <span>후기량 {scoreDetail.blogVolume}/3</span>
+        <span>광고감점 -{scoreDetail.adPenalty}</span>
+        <span>이벤트감점 -{scoreDetail.promoPenalty}</span>
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
@@ -300,28 +373,6 @@ export default function PlaceCard({
             네이버 지도 열기
           </button>
         </a>
-      </div>
-
-      <div
-        style={{
-          marginTop: 10,
-          padding: "8px 10px",
-          borderRadius: 10,
-          border: "1px solid #e5e7eb",
-          background: "#f9fafb",
-          fontSize: 11,
-          color: "#4b5563",
-          display: "flex",
-          gap: 10,
-          flexWrap: "wrap",
-        }}
-      >
-        <span>찜 {scoreDetail.saved}/5</span>
-        <span>재방문 {scoreDetail.revisit}/3</span>
-        <span>태그 {scoreDetail.tags}/5</span>
-        <span>거리 {scoreDetail.distance}/2</span>
-        <span>검색순위 {scoreDetail.rankBoost}/10</span>
-        <span>광고감점 -{scoreDetail.adPenalty}</span>
       </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>

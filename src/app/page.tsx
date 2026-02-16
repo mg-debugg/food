@@ -25,6 +25,10 @@ export default function Page() {
 
   const [metaMap, setMetaMap] = useState<Record<string, PlaceMeta>>({});
   const [adSignalMap, setAdSignalMap] = useState<Record<string, number>>({});
+  const [promoSignalMap, setPromoSignalMap] = useState<Record<string, number>>({});
+  const [commentRankBonusMap, setCommentRankBonusMap] = useState<Record<string, number>>({});
+  const [blogVolumeBonusMap, setBlogVolumeBonusMap] = useState<Record<string, number>>({});
+  const [useDistanceBonus, setUseDistanceBonus] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
@@ -67,6 +71,20 @@ export default function Page() {
     setAdSignalMap((prev) => {
       if ((prev[key] ?? 0) === suspiciousCount) return prev;
       return { ...prev, [key]: suspiciousCount };
+    });
+  }, []);
+
+  const updatePromoSignal = useCallback((key: string, eventCount: number) => {
+    setPromoSignalMap((prev) => {
+      if ((prev[key] ?? 0) === eventCount) return prev;
+      return { ...prev, [key]: eventCount };
+    });
+  }, []);
+
+  const updateBlogVolumeBonus = useCallback((key: string, bonus: number) => {
+    setBlogVolumeBonusMap((prev) => {
+      if ((prev[key] ?? 0) === bonus) return prev;
+      return { ...prev, [key]: bonus };
     });
   }, []);
 
@@ -117,6 +135,35 @@ export default function Page() {
 
       const nextItems: NaverLocalItem[] = Array.isArray(data?.items) ? data.items : [];
       setItems(nextItems);
+
+      if (sortMode === "local") {
+        const commentParams = new URLSearchParams({
+          query: q,
+          region,
+          display: "10",
+          start: "1",
+          sort: "comment",
+        });
+        const commentRes = await fetch(`/api/naver/local?${commentParams.toString()}`);
+        const commentData = await commentRes.json().catch(() => null);
+        if (commentRes.ok && Array.isArray(commentData?.items)) {
+          const map: Record<string, number> = {};
+          commentData.items.forEach((it: NaverLocalItem, idx: number) => {
+            const k = placeKey(it);
+            let bonus = 0;
+            if (idx === 0) bonus = 4;
+            else if (idx === 1) bonus = 3;
+            else if (idx === 2) bonus = 2;
+            else if (idx <= 4) bonus = 1;
+            map[k] = bonus;
+          });
+          setCommentRankBonusMap(map);
+        } else {
+          setCommentRankBonusMap({});
+        }
+      } else {
+        setCommentRankBonusMap({});
+      }
     } catch (e: any) {
       setError(String(e?.message ?? e));
     } finally {
@@ -184,19 +231,32 @@ export default function Page() {
           tags: [],
           updatedAt: 0,
         } satisfies PlaceMeta);
-      const rankBoost = Math.max(0, 10 - idx);
+      const rankBoost = Math.max(0, 6 - idx);
+      const commentRankBoost = commentRankBonusMap[key] ?? 0;
+      const blogVolumeBoost = blogVolumeBonusMap[key] ?? 0;
       const adSignals = adSignalMap[key] ?? 0;
+      const promoSignals = promoSignalMap[key] ?? 0;
       const adPenalty = Math.min(3, adSignals);
+      const promoPenalty = Math.min(2, promoSignals);
       const coord = parseNaverCoords(it);
       const distance =
-        userLocation && coord ? distanceKm(userLocation, { lat: coord.lat, lng: coord.lng }) : null;
+        useDistanceBonus && userLocation && coord
+          ? distanceKm(userLocation, { lat: coord.lat, lng: coord.lng })
+          : null;
       const distanceBonus = distance == null ? 0 : getDistanceBonus(distance);
       const savedScore = meta.saved ? 5 : 0;
       const revisitScore = Math.min(3, meta.revisitCount);
       const tagScore = Math.min(5, meta.tags.length);
-      const scoreMax = 25;
-      const baseScore = savedScore + revisitScore + tagScore + distanceBonus + rankBoost;
-      const score = Math.max(0, Math.min(scoreMax, baseScore - adPenalty));
+      const scoreMax = 28;
+      const baseScore =
+        savedScore +
+        revisitScore +
+        tagScore +
+        distanceBonus +
+        rankBoost +
+        commentRankBoost +
+        blogVolumeBoost;
+      const score = Math.max(0, Math.min(scoreMax, baseScore - adPenalty - promoPenalty));
       return {
         it,
         key,
@@ -205,6 +265,7 @@ export default function Page() {
         scoreMax,
         adSignals,
         adPenalty,
+        promoPenalty,
         distance,
         distanceBonus,
         scoreDetail: {
@@ -213,7 +274,10 @@ export default function Page() {
           tags: tagScore,
           distance: distanceBonus,
           adPenalty,
+          promoPenalty,
           rankBoost,
+          commentRank: commentRankBoost,
+          blogVolume: blogVolumeBoost,
         },
       };
     });
@@ -223,7 +287,19 @@ export default function Page() {
     }
 
     return enriched;
-  }, [items, region, category, sortMode, metaMap, adSignalMap, userLocation]);
+  }, [
+    items,
+    region,
+    category,
+    sortMode,
+    metaMap,
+    adSignalMap,
+    promoSignalMap,
+    commentRankBonusMap,
+    blogVolumeBonusMap,
+    useDistanceBonus,
+    userLocation,
+  ]);
 
   return (
     <div
@@ -307,30 +383,51 @@ export default function Page() {
             >
               검색
             </button>
-            <button
-              onClick={requestLocation}
-              disabled={locating}
-              style={{
-                height: 46,
-                padding: "0 12px",
-                borderRadius: 14,
-                border: "1px solid #d1d5db",
-                background: "#fff",
-                color: "#111827",
-                fontWeight: 700,
-                opacity: locating ? 0.7 : 1,
-                cursor: locating ? "wait" : "pointer",
-              }}
-            >
-              {locating ? "위치 확인중" : "위치"}
-            </button>
+            {useDistanceBonus ? (
+              <button
+                onClick={requestLocation}
+                disabled={locating}
+                style={{
+                  height: 46,
+                  padding: "0 12px",
+                  borderRadius: 14,
+                  border: "1px solid #d1d5db",
+                  background: "#fff",
+                  color: "#111827",
+                  fontWeight: 700,
+                  opacity: locating ? 0.7 : 1,
+                  cursor: locating ? "wait" : "pointer",
+                }}
+              >
+                {locating ? "위치 확인중" : "위치"}
+              </button>
+            ) : null}
           </div>
-          {locationError ? (
+          <label
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              marginTop: -4,
+              marginBottom: 10,
+              fontSize: 13,
+              color: "#374151",
+              fontWeight: 600,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={useDistanceBonus}
+              onChange={(e) => setUseDistanceBonus(e.target.checked)}
+            />
+            가까운 곳 우선 (위치 가점)
+          </label>
+          {useDistanceBonus && locationError ? (
             <div style={{ marginTop: -4, marginBottom: 10, fontSize: 12, color: "#b91c1c" }}>
               {locationError}
             </div>
           ) : null}
-          {userLocation ? (
+          {useDistanceBonus && userLocation ? (
             <div style={{ marginTop: -4, marginBottom: 10, fontSize: 12, color: "#4b5563" }}>
               위치 기반 거리 가점 활성화됨
             </div>
@@ -398,6 +495,7 @@ export default function Page() {
               scoreMax,
               adSignals,
               adPenalty,
+              promoPenalty,
               distance,
               distanceBonus,
               scoreDetail,
@@ -411,10 +509,13 @@ export default function Page() {
               region={region}
               adSignals={adSignals}
               adPenalty={adPenalty}
+              promoPenalty={promoPenalty}
               distanceKm={distance}
               distanceBonus={distanceBonus}
               scoreDetail={scoreDetail}
               onAdSignal={updateAdSignal}
+              onPromoSignal={updatePromoSignal}
+              onBlogVolumeBonus={updateBlogVolumeBonus}
               onUpdate={updateMeta}
             />
             ),
