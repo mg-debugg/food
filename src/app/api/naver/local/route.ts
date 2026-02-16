@@ -1,18 +1,12 @@
-export const runtime = "nodejs";
+﻿export const runtime = "nodejs";
+
+type CachedLocalPayload = { expiresAt: number; payload: any };
 
 const ALLOWED_REGIONS = ["수원", "대구", "여수", "광명"] as const;
 type Region = (typeof ALLOWED_REGIONS)[number];
 
-function stripHtmlTags(s: string): string {
-  if (!s) return "";
-  return s.replace(/<[^>]*>/g, "");
-}
-
-function clampInt(input: string, min: number, max: number, fallback: number): number {
-  const n = Number.parseInt(input, 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.min(max, Math.max(min, n));
-}
+const SEARCH_CACHE_TTL_MS = 60 * 1000;
+const searchCache = new Map<string, CachedLocalPayload>();
 
 const NON_FOOD_CATEGORY_PATTERNS = [
   /행정복지센터/,
@@ -80,22 +74,35 @@ const FOOD_CATEGORY_PATTERNS = [
   /샤브/,
 ];
 
-function isFoodCategory(rawCategory: unknown): boolean {
-  const category = String(rawCategory ?? "").trim();
-  if (!category) return false;
-  if (NON_FOOD_CATEGORY_PATTERNS.some((p) => p.test(category))) return false;
-  return FOOD_CATEGORY_PATTERNS.some((p) => p.test(category));
-}
-
 type MapRestaurantSummary = {
   __typename: "RestaurantListSummary";
   name?: string;
   roadAddress?: string;
   address?: string;
   commonAddress?: string;
+  x?: string;
+  y?: string;
   imageUrl?: string;
   imageUrls?: string[];
 };
+
+function stripHtmlTags(s: string): string {
+  if (!s) return "";
+  return s.replace(/<[^>]*>/g, "");
+}
+
+function clampInt(input: string, min: number, max: number, fallback: number): number {
+  const n = Number.parseInt(input, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function isFoodCategory(rawCategory: unknown): boolean {
+  const category = String(rawCategory ?? "").trim();
+  if (!category) return false;
+  if (NON_FOOD_CATEGORY_PATTERNS.some((p) => p.test(category))) return false;
+  return FOOD_CATEGORY_PATTERNS.some((p) => p.test(category));
+}
 
 function normalizeText(input: string): string {
   return String(input || "")
@@ -135,10 +142,10 @@ function extractApolloState(html: string): Record<string, unknown> | null {
     if (inString) {
       if (escaping) escaping = false;
       else if (ch === "\\") escaping = true;
-      else if (ch === "\"") inString = false;
+      else if (ch === '"') inString = false;
       continue;
     }
-    if (ch === "\"") {
+    if (ch === '"') {
       inString = true;
       continue;
     }
@@ -194,46 +201,107 @@ async function fetchMapCandidates(query: string): Promise<MapRestaurantSummary[]
   return collectMapCandidates(apolloState);
 }
 
-function matchImageUrl(
-  localItem: any,
-  mapCandidates: MapRestaurantSummary[],
-  region: string,
-): string {
+function toCoord(raw: unknown): number | null {
+  const n = Number(String(raw ?? ""));
+  if (!Number.isFinite(n)) return null;
+  if (Math.abs(n) > 1000) return n / 10_000_000;
+  return n;
+}
+
+function scoreCandidate(localItem: any, c: MapRestaurantSummary, region: string): number {
   const name = normalizeText(String(localItem?.title ?? ""));
   const address = normalizeText(String(localItem?.roadAddress || localItem?.address || ""));
   const regionNorm = normalizeText(region);
+  const cName = normalizeText(String(c.name || ""));
+  const cAddress = normalizeText([c.roadAddress, c.address, c.commonAddress].filter(Boolean).join(" "));
 
-  let bestScore = -1;
-  let bestUrl = "";
+  let score = 0;
+  if (cName === name) score += 100;
+  else if (cName.includes(name) || name.includes(cName)) score += 60;
 
-  for (const c of mapCandidates) {
-    const cName = normalizeText(String(c.name || ""));
-    const cAddress = normalizeText(
-      [c.roadAddress, c.address, c.commonAddress].filter(Boolean).join(" "),
-    );
-
-    let score = 0;
-    if (cName === name) score += 100;
-    else if (cName.includes(name) || name.includes(cName)) score += 60;
-
-    if (address && cAddress && (cAddress.includes(address) || address.includes(cAddress))) {
-      score += 30;
-    } else if (address && cAddress && address.length >= 4 && cAddress.includes(address.slice(0, 4))) {
-      score += 12;
-    }
-
-    if (cAddress.includes(regionNorm)) score += 6;
-
-    const primary = decodeNaverEscapedUrl(String(c.imageUrl || ""));
-    const fallback = decodeNaverEscapedUrl(String(c.imageUrls?.[0] || ""));
-    const imageUrl = isHttpUrl(primary) ? primary : fallback;
-    if (!isHttpUrl(imageUrl)) continue;
-    if (score > bestScore) {
-      bestScore = score;
-      bestUrl = imageUrl;
-    }
+  if (address && cAddress && (cAddress.includes(address) || address.includes(cAddress))) {
+    score += 30;
+  } else if (address && cAddress && address.length >= 4 && cAddress.includes(address.slice(0, 4))) {
+    score += 12;
   }
-  return bestUrl;
+
+  if (cAddress.includes(regionNorm)) score += 6;
+
+  const localX = toCoord(localItem?.mapx);
+  const localY = toCoord(localItem?.mapy);
+  const candX = toCoord(c.x);
+  const candY = toCoord(c.y);
+  if (localX !== null && localY !== null && candX !== null && candY !== null) {
+    const d = Math.hypot(localX - candX, localY - candY);
+    if (d < 0.0003) score += 120;
+    else if (d < 0.001) score += 80;
+    else if (d < 0.003) score += 40;
+  }
+
+  return score;
+}
+
+function getImageUrl(candidate: MapRestaurantSummary): string {
+  const primary = decodeNaverEscapedUrl(String(candidate.imageUrl || ""));
+  const fallback = decodeNaverEscapedUrl(String(candidate.imageUrls?.[0] || ""));
+  return isHttpUrl(primary) ? primary : fallback;
+}
+
+function matchImageUrls(items: any[], mapCandidates: MapRestaurantSummary[], region: string): string[] {
+  const used = new Set<number>();
+  const result: string[] = [];
+
+  for (const item of items) {
+    let bestUnusedIdx = -1;
+    let bestUnusedScore = -1;
+    let bestAnyIdx = -1;
+    let bestAnyScore = -1;
+
+    for (let i = 0; i < mapCandidates.length; i += 1) {
+      const c = mapCandidates[i];
+      const imageUrl = getImageUrl(c);
+      if (!isHttpUrl(imageUrl)) continue;
+
+      const score = scoreCandidate(item, c, region);
+      if (score > bestAnyScore) {
+        bestAnyScore = score;
+        bestAnyIdx = i;
+      }
+      if (!used.has(i) && score > bestUnusedScore) {
+        bestUnusedScore = score;
+        bestUnusedIdx = i;
+      }
+    }
+
+    // Avoid noisy wrong-match; if confidence is low, return empty and let client fallback.
+    const minScore = 55;
+    if (bestUnusedIdx >= 0 && bestUnusedScore >= minScore) {
+      used.add(bestUnusedIdx);
+      result.push(getImageUrl(mapCandidates[bestUnusedIdx]));
+      continue;
+    }
+    if (bestAnyIdx >= 0 && bestAnyScore >= 95) {
+      result.push(getImageUrl(mapCandidates[bestAnyIdx]));
+      continue;
+    }
+    result.push("");
+  }
+
+  return result;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timer = setTimeout(() => resolve(fallback), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 export async function GET(req: Request) {
@@ -251,12 +319,21 @@ export async function GET(req: Request) {
   const sortRaw = (sp.get("sort") ?? "random").toLowerCase();
   const sort = sortRaw === "comment" ? "comment" : "random";
   const pageSize = 5;
+  const cacheKey = `${region}|${query}|${sort}|${start}|${wantedDisplay}`;
 
   if (!query) {
     return Response.json(
       { error: "query parameter is required" },
       { status: 400, headers: { "Cache-Control": "no-store" } },
     );
+  }
+
+  const cached = searchCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return Response.json(cached.payload, { headers: { "Cache-Control": "no-store" } });
+  }
+  if (cached && cached.expiresAt <= Date.now()) {
+    searchCache.delete(cacheKey);
   }
 
   const clientId = process.env.NAVER_CLIENT_ID;
@@ -296,13 +373,24 @@ export async function GET(req: Request) {
   }
 
   try {
+    const mapCandidatesPromise = (async () => {
+      try {
+        let candidates = await fetchMapCandidates(finalQuery);
+        if (candidates.length === 0) {
+          candidates = await fetchMapCandidates(`${region} ${query} 맛집`);
+        }
+        return candidates;
+      } catch {
+        return [] as MapRestaurantSummary[];
+      }
+    })();
+
     const seen = new Set<string>();
     const normalizedItems: any[] = [];
     let firstResponse: any = null;
-    let pageStart = start;
 
-    for (let attempt = 0; attempt < 20 && normalizedItems.length < wantedDisplay; attempt += 1) {
-      const page = await fetchPage(pageSize, pageStart, sort);
+    const appendItems = (page: any) => {
+      if (!page) return;
       if (!firstResponse) firstResponse = page;
       const items = Array.isArray(page?.items) ? page.items : [];
 
@@ -318,54 +406,40 @@ export async function GET(req: Request) {
         normalizedItems.push(it);
         if (normalizedItems.length >= wantedDisplay) break;
       }
+    };
 
-      pageStart += pageSize;
-    }
-
-    // Fallback pass: when random/page dedupe leaves fewer than 10, try comment sort.
-    if (normalizedItems.length < wantedDisplay && sort !== "comment") {
-      let fallbackStart = start;
-      for (let attempt = 0; attempt < 20 && normalizedItems.length < wantedDisplay; attempt += 1) {
-        const page = await fetchPage(pageSize, fallbackStart, "comment");
-        if (!firstResponse) firstResponse = page;
-        const items = Array.isArray(page?.items) ? page.items : [];
-
-        for (const raw of items) {
-          const it = {
-            ...raw,
-            title: stripHtmlTags(String(raw?.title ?? "")),
-          };
-          if (!isFoodCategory(it.category)) continue;
-          const key = `${it.title}|${it.roadAddress || it.address || ""}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          normalizedItems.push(it);
+    const collectBySort = async (
+      sortMode: "random" | "comment",
+      maxPages: number,
+      parallelSize: number,
+    ) => {
+      const starts = Array.from({ length: maxPages }, (_, i) => start + i * pageSize);
+      for (let i = 0; i < starts.length && normalizedItems.length < wantedDisplay; i += parallelSize) {
+        const batch = starts.slice(i, i + parallelSize);
+        const pages = await Promise.all(batch.map((s) => fetchPage(pageSize, s, sortMode).catch(() => null)));
+        for (const page of pages) {
+          appendItems(page);
           if (normalizedItems.length >= wantedDisplay) break;
         }
-
-        fallbackStart += pageSize;
       }
+    };
+
+    await collectBySort(sort, 8, 3);
+    if (normalizedItems.length < wantedDisplay && sort !== "comment") {
+      await collectBySort("comment", 4, 2);
     }
 
     const finalItems = normalizedItems.slice(0, wantedDisplay);
+    const mapCandidates = await withTimeout(mapCandidatesPromise, 1200, [] as MapRestaurantSummary[]);
+    const mappedImageUrls = matchImageUrls(finalItems, mapCandidates, region);
 
-    // Attach Naver Map representative image in one batch to avoid per-card map scraping.
-    let mapCandidates: MapRestaurantSummary[] = [];
-    try {
-      mapCandidates = await fetchMapCandidates(finalQuery);
-      if (mapCandidates.length === 0) {
-        mapCandidates = await fetchMapCandidates(`${region} ${query} 맛집`);
-      }
-    } catch {
-      mapCandidates = [];
-    }
-
-    const enrichedItems = finalItems.map((it) => ({
+    const enrichedItems = finalItems.map((it, idx) => ({
       ...it,
-      mapImageUrl: matchImageUrl(it, mapCandidates, region),
+      mapImageUrl: mappedImageUrls[idx] || "",
     }));
 
     const json = { ...(firstResponse ?? {}), items: enrichedItems };
+    searchCache.set(cacheKey, { expiresAt: Date.now() + SEARCH_CACHE_TTL_MS, payload: json });
 
     return Response.json(json, { headers: { "Cache-Control": "no-store" } });
   } catch (err: any) {
