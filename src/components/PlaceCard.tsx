@@ -154,6 +154,11 @@ export default function PlaceCard({
     let mounted = true;
     const run = async () => {
       try {
+        const preloadedImage = typeof item.mapImageUrl === "string" ? item.mapImageUrl : "";
+        if (preloadedImage) {
+          setMenuImage(preloadedImage);
+          return;
+        }
         setMenuImage("");
         const params = new URLSearchParams({
           name: item.title,
@@ -178,7 +183,7 @@ export default function PlaceCard({
     return () => {
       mounted = false;
     };
-  }, [item.title, addr, region, shouldLoadDetails]);
+  }, [item.title, item.mapImageUrl, addr, region, shouldLoadDetails]);
 
   return (
     <div

@@ -369,30 +369,37 @@ export default function Page() {
           <div style={{ margin: "8px 0 14px", display: "flex", alignItems: "center", gap: 10 }}>
             <h1 style={{ margin: 0, fontSize: 30, fontWeight: 900, color: "#111827" }}>로컬 맛집찾기</h1>
             <img
-              src="/title-user.jpg"
+              src="/title-user-cutout.png"
               alt="로컬 맛집찾기 마스코트"
-              style={{ width: 44, height: 44, borderRadius: 10, objectFit: "cover", border: "1px solid #d1d5db" }}
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 10,
+                objectFit: "contain",
+                background: "#fff",
+                border: "1px solid #d1d5db",
+              }}
             />
-          </div>
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-            {REGIONS.map((r) => (
-              <button
-                key={r}
-                onClick={() => setRegion(r)}
-                style={{
-                  padding: "7px 12px",
-                  borderRadius: 999,
-                  border: "1px solid #d1d5db",
-                  background: region === r ? "#111827" : "#fff",
-                  color: region === r ? "#fff" : "#374151",
-                  fontWeight: 800,
-                  fontSize: 12,
-                }}
-              >
-                {r}
-              </button>
-            ))}
+            <select
+              value={region}
+              onChange={(e) => setRegion(e.target.value as Region)}
+              style={{
+                height: 38,
+                borderRadius: 10,
+                border: "1px solid #d1d5db",
+                padding: "0 10px",
+                background: "#fff",
+                color: "#111827",
+                fontWeight: 800,
+                fontSize: 13,
+              }}
+            >
+              {REGIONS.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
           </div>
 
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
