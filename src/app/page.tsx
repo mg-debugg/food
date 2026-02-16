@@ -10,6 +10,7 @@ import { getTopHotplace, type HotplaceScoreResult } from "../lib/hotplace";
 type Region = "수원" | "대구" | "여수" | "광명";
 
 const REGIONS: Region[] = ["수원", "대구", "여수", "광명"];
+const DISPLAY_LIMIT = 10;
 const EARTH_RADIUS_KM = 6371;
 const NEARBY_DISTANCE_KM = 3;
 const NON_FOOD_CATEGORY_PATTERNS = [
@@ -184,7 +185,7 @@ export default function Page() {
       const params = new URLSearchParams({
         query: q,
         region,
-        display: "10",
+        display: String(DISPLAY_LIMIT),
         start: "1",
         sort: "random",
       });
@@ -206,11 +207,18 @@ export default function Page() {
     const hasRegion = (it: NaverLocalItem) =>
       (it.address || "").includes(region) || (it.roadAddress || "").includes(region);
 
-    let list = items.filter(isFoodPlace);
-    const prefer = items.filter(hasRegion);
-    const others = list.filter((it) => !hasRegion(it));
-    const preferredFood = prefer.filter(isFoodPlace);
-    if (preferredFood.length > 0) list = [...preferredFood, ...others];
+    const food = items.filter(isFoodPlace);
+    const nonFood = items.filter((it) => !isFoodPlace(it));
+    const preferredFood = food.filter(hasRegion);
+    const otherFood = food.filter((it) => !hasRegion(it));
+
+    let list = preferredFood.length > 0 ? [...preferredFood, ...otherFood] : food;
+    if (list.length < DISPLAY_LIMIT) {
+      const preferredNonFood = nonFood.filter(hasRegion);
+      const otherNonFood = nonFood.filter((it) => !hasRegion(it));
+      list = [...list, ...preferredNonFood, ...otherNonFood];
+    }
+    list = list.slice(0, DISPLAY_LIMIT);
 
     const enriched = list.map((it, idx) => {
       const key = placeKey(it);
@@ -336,7 +344,7 @@ export default function Page() {
             LOCAL DINING PICKER
           </div>
           <h1 style={{ margin: "8px 0 14px", fontSize: 30, fontWeight: 900, color: "#111827" }}>
-            노포/맛집 탐색
+            로컬 맛집찾기
           </h1>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>

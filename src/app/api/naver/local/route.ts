@@ -24,7 +24,7 @@ export async function GET(req: Request) {
     ? (regionRaw as Region)
     : "수원";
 
-  const wantedDisplay = clampInt(sp.get("display") ?? "10", 1, 10, 10);
+  const wantedDisplay = 10;
   const start = clampInt(sp.get("start") ?? "1", 1, 1000, 1);
   const sortRaw = (sp.get("sort") ?? "random").toLowerCase();
   const sort = sortRaw === "comment" ? "comment" : "random";
@@ -78,8 +78,8 @@ export async function GET(req: Request) {
     let firstResponse: any = null;
     let pageStart = start;
 
-    for (let attempt = 0; attempt < 5 && normalizedItems.length < wantedDisplay; attempt += 1) {
-      const page = await fetchPage(5, pageStart);
+    for (let attempt = 0; attempt < 10 && normalizedItems.length < wantedDisplay; attempt += 1) {
+      const page = await fetchPage(10, pageStart);
       if (!firstResponse) firstResponse = page;
       const items = Array.isArray(page?.items) ? page.items : [];
 
@@ -95,7 +95,7 @@ export async function GET(req: Request) {
         if (normalizedItems.length >= wantedDisplay) break;
       }
 
-      pageStart += 5;
+      pageStart += 10;
     }
 
     const json = { ...(firstResponse ?? {}), items: normalizedItems.slice(0, wantedDisplay) };

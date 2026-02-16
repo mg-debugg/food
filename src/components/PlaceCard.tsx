@@ -129,16 +129,45 @@ export default function PlaceCard({
     let mounted = true;
     const run = async () => {
       try {
-        const params = new URLSearchParams({ query: `${item.title} 대표메뉴 음식`, region });
-        const res = await fetch(`/api/naver/image?${params.toString()}`);
-        const data = await res.json().catch(() => null);
-        if (!mounted) return;
-        if (!res.ok) {
-          setMenuImage("");
-          return;
+        setMenuImage("");
+        const queries = [
+          `${item.title} 대표메뉴 음식 사진`,
+          `${item.title} ${region} 시그니처 메뉴`,
+          `${item.title} ${region} 음식`,
+          `${item.title} 메뉴 사진`,
+          `${item.title} 맛집 음식`,
+        ];
+
+        let bestFood: { url: string; area: number } | null = null;
+        let bestAny: { url: string; area: number } | null = null;
+
+        for (const q of queries) {
+          const params = new URLSearchParams({ query: q, region });
+          const res = await fetch(`/api/naver/image?${params.toString()}`);
+          const data = await res.json().catch(() => null);
+          if (!mounted) return;
+          if (!res.ok) continue;
+
+          const imageUrl = typeof data?.image === "string" ? data.image : "";
+          if (!imageUrl) continue;
+
+          const width = Number(data?.width ?? 0);
+          const height = Number(data?.height ?? 0);
+          const area = Math.max(0, width) * Math.max(0, height);
+          const foundFood = Boolean(data?.foundFood);
+          const isHighResolution = Boolean(data?.isHighResolution);
+
+          if (!bestAny || area > bestAny.area) bestAny = { url: imageUrl, area };
+          if (foundFood && (!bestFood || area > bestFood.area)) bestFood = { url: imageUrl, area };
+
+          // Prefer an image that is both food-related and high resolution.
+          if (foundFood && isHighResolution) {
+            setMenuImage(imageUrl);
+            return;
+          }
         }
-        const imageUrl = typeof data?.image === "string" ? data.image : "";
-        setMenuImage(imageUrl);
+
+        setMenuImage(bestFood?.url || bestAny?.url || "");
       } catch {
         if (mounted) setMenuImage("");
       }

@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
 export const metadata = {
-  title: "로컬 노포찾기",
-  description: "네이버 지역/블로그 API를 서버 프록시로 호출하는 로컬 노포찾기",
+  title: "로컬 맛집 탐색",
+  description: "네이버 지역/블로그 API를 서버 프록시로 호출하는 로컬 맛집 탐색",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -14,4 +14,3 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     </html>
   );
 }
-
