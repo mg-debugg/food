@@ -141,9 +141,13 @@ export default function Page() {
           recent3mCount: 0,
           totalReviewCount: 0,
           multiplier: 1,
+          hotKeywordCount: 0,
+          recentHotKeywordCount: 0,
         } satisfies HotplaceScoreResult);
 
-      const isHotNow = hotplace.recent3mCount > 0 || hotplace.multiplier > 1;
+      const isHotNow =
+        hotplace.recent3mCount > 0 || hotplace.multiplier > 1 || hotplace.hotKeywordCount > 0;
+      const hotRankScore = hotplace.hotplaceScore + searchIndexScore * 3;
 
       return {
         it,
@@ -158,6 +162,8 @@ export default function Page() {
         hotplaceRatioPercent: hotplace.recentRatioPercent,
         hotplaceRecentCount: hotplace.recent3mCount,
         hotplaceRatio: hotplace.recentRatio,
+        hotKeywordCount: hotplace.hotKeywordCount,
+        hotRankScore,
         isHotNow,
       };
     });
@@ -166,9 +172,11 @@ export default function Page() {
       const hotOnly = enriched.filter((e) => e.isHotNow);
       hotOnly.sort(
         (a, b) =>
+          b.hotRankScore - a.hotRankScore ||
           b.hotplaceScore - a.hotplaceScore ||
+          b.hotKeywordCount - a.hotKeywordCount ||
           b.hotplaceRatio - a.hotplaceRatio ||
-          b.score - a.score,
+          b.searchIndexScore - a.searchIndexScore,
       );
       return hotOnly;
     }
@@ -191,6 +199,8 @@ export default function Page() {
               recent3mCount: p.hotplaceRecentCount,
               totalReviewCount: 0,
               multiplier: p.hotplaceScore > 0 ? 1 : 0,
+              hotKeywordCount: p.hotKeywordCount,
+              recentHotKeywordCount: p.hotKeywordCount,
             },
           })),
       ),
@@ -335,6 +345,7 @@ export default function Page() {
               adEventPenalty,
               penaltyDetectedCount,
               hotplaceRecentCount,
+              hotKeywordCount,
               isHotNow,
             }) => (
               <PlaceCard
@@ -347,6 +358,7 @@ export default function Page() {
                 adEventPenalty={adEventPenalty}
                 penaltyDetectedCount={penaltyDetectedCount}
                 hotplaceRecentCount={hotplaceRecentCount}
+                hotKeywordCount={hotKeywordCount}
                 isHotNow={isHotNow}
                 region={region}
                 onPenaltySignal={updatePenaltySignal}

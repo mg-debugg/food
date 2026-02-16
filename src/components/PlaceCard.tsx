@@ -16,6 +16,7 @@ type Props = {
   adEventPenalty: number;
   penaltyDetectedCount: number;
   hotplaceRecentCount: number;
+  hotKeywordCount: number;
   isHotNow: boolean;
   region: Region;
   onPenaltySignal: (key: string, detected: number) => void;
@@ -50,6 +51,7 @@ export default function PlaceCard({
   adEventPenalty,
   penaltyDetectedCount,
   hotplaceRecentCount,
+  hotKeywordCount,
   isHotNow,
   region,
   onPenaltySignal,
@@ -250,6 +252,21 @@ export default function PlaceCard({
             }}
           >
             핫플 마크 · 최근 3개월 리뷰 {hotplaceRecentCount}건
+          </span>
+        ) : null}
+        {hotKeywordCount > 0 ? (
+          <span
+            style={{
+              padding: "5px 9px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 800,
+              background: "#eff6ff",
+              color: "#1d4ed8",
+              border: "1px solid #bfdbfe",
+            }}
+          >
+            핫플 키워드 {hotKeywordCount}건
           </span>
         ) : null}
       </div>
