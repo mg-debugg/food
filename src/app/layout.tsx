@@ -1,8 +1,8 @@
 import type { ReactNode } from "react";
 
 export const metadata = {
-  title: "수원 로컬 맛집 찾기 (MVP)",
-  description: "네이버 지역검색 API를 서버 프록시로 호출하는 MVP",
+  title: "로컬 노포찾기",
+  description: "네이버 지역/블로그 API를 서버 프록시로 호출하는 로컬 노포찾기",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

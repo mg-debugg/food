@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { NaverBlogItem, NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 
-type Region = "수원" | "여수";
+type Region = "수원" | "여수" | "대구";
 
 type Props = {
   item: NaverLocalItem;

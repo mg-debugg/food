@@ -1,6 +1,6 @@
 export const runtime = "nodejs";
 
-const ALLOWED_REGIONS = ["수원", "여수"] as const;
+const ALLOWED_REGIONS = ["수원", "여수", "대구"] as const;
 type Region = (typeof ALLOWED_REGIONS)[number];
 
 function stripHtmlTags(s: string): string {

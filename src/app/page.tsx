@@ -6,11 +6,11 @@ import type { NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 import { computeLocalScore, loadMeta, saveMeta } from "../lib/storage";
 
-type Region = "수원" | "여수";
+type Region = "수원" | "여수" | "대구";
 type SortMode = "local" | "random" | "comment";
 type CategoryMode = "전체" | "한식" | "중식" | "일식" | "양식" | "카페" | "술집";
 
-const REGIONS: Region[] = ["수원", "여수"];
+const REGIONS: Region[] = ["수원", "여수", "대구"];
 const CATEGORIES: CategoryMode[] = ["전체", "한식", "중식", "일식", "양식", "카페", "술집"];
 
 export default function Page() {
@@ -91,7 +91,6 @@ export default function Page() {
   }
 
   const prepared = useMemo(() => {
-    // Prefer items whose address contains selected region.
     const hasRegion = (it: NaverLocalItem) =>
       (it.address || "").includes(region) || (it.roadAddress || "").includes(region);
 
@@ -132,9 +131,7 @@ export default function Page() {
       }}
     >
       <div style={{ maxWidth: 960, margin: "0 auto", padding: 16 }}>
-        <h1 style={{ fontSize: 28, fontWeight: 900, margin: "18px 0 12px" }}>
-          로컬 맛집 찾기 (MVP)
-        </h1>
+        <h1 style={{ fontSize: 28, fontWeight: 900, margin: "18px 0 12px" }}>로컬 노포찾기</h1>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
           {REGIONS.map((r) => (
@@ -170,7 +167,7 @@ export default function Page() {
             onKeyDown={(e) => {
               if (e.key === "Enter") search();
             }}
-            placeholder={`검색어를 입력하세요 (예: 곱창)`}
+            placeholder="검색어를 입력하세요 (예: 곱창)"
             style={{
               flex: 1,
               height: 44,
