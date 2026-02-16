@@ -5,10 +5,10 @@ import PlaceCard from "../components/PlaceCard";
 import type { NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 import { loadMeta, saveMeta } from "../lib/storage";
-import { computeNopoScore, type NopoResult } from "../lib/nopo";
-import type { HotplaceScoreResult } from "../lib/hotplace";
+import { getTopHotplace, type HotplaceScoreResult } from "../lib/hotplace";
 
 type Region = "수원" | "여수" | "대구";
+type ViewMode = "base" | "hot";
 
 const REGIONS: Region[] = ["수원", "여수", "대구"];
 
@@ -18,18 +18,11 @@ export default function Page() {
   const [items, setItems] = useState<NaverLocalItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [nopoMode, setNopoMode] = useState(false);
+  const [viewMode, setViewMode] = useState<ViewMode>("base");
 
   const [metaMap, setMetaMap] = useState<Record<string, PlaceMeta>>({});
-  const [adSignalMap, setAdSignalMap] = useState<Record<string, number>>({});
-  const [promoSignalMap, setPromoSignalMap] = useState<Record<string, number>>({});
-  const [nopoMap, setNopoMap] = useState<Record<string, NopoResult>>({});
+  const [penaltySignalMap, setPenaltySignalMap] = useState<Record<string, number>>({});
   const [hotplaceMap, setHotplaceMap] = useState<Record<string, HotplaceScoreResult>>({});
-
-  const [useDistanceBonus, setUseDistanceBonus] = useState(false);
-  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
-  const [locationError, setLocationError] = useState<string | null>(null);
-  const [locating, setLocating] = useState(false);
 
   useEffect(() => {
     setMetaMap(loadMeta());
@@ -65,27 +58,10 @@ export default function Page() {
     });
   }, []);
 
-  const updateAdSignal = useCallback((key: string, suspiciousCount: number) => {
-    setAdSignalMap((prev) => {
-      if ((prev[key] ?? 0) === suspiciousCount) return prev;
-      return { ...prev, [key]: suspiciousCount };
-    });
-  }, []);
-
-  const updatePromoSignal = useCallback((key: string, eventCount: number) => {
-    setPromoSignalMap((prev) => {
-      if ((prev[key] ?? 0) === eventCount) return prev;
-      return { ...prev, [key]: eventCount };
-    });
-  }, []);
-
-  const updateNopo = useCallback((key: string, result: NopoResult) => {
-    setNopoMap((prev) => {
-      const old = prev[key];
-      if (old && old.nopoScore === result.nopoScore && old.evidence.join("|") === result.evidence.join("|")) {
-        return prev;
-      }
-      return { ...prev, [key]: result };
+  const updatePenaltySignal = useCallback((key: string, detected: number) => {
+    setPenaltySignalMap((prev) => {
+      if ((prev[key] ?? 0) === detected) return prev;
+      return { ...prev, [key]: detected };
     });
   }, []);
 
@@ -102,26 +78,6 @@ export default function Page() {
       }
       return { ...prev, [key]: result };
     });
-  }, []);
-
-  const requestLocation = useCallback(() => {
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      setLocationError("이 브라우저는 위치 정보를 지원하지 않습니다.");
-      return;
-    }
-    setLocating(true);
-    setLocationError(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setUserLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        setLocating(false);
-      },
-      () => {
-        setLocationError("위치 권한을 확인해 주세요.");
-        setLocating(false);
-      },
-      { enableHighAccuracy: false, timeout: 9000, maximumAge: 60000 },
-    );
   }, []);
 
   async function search() {
@@ -153,42 +109,6 @@ export default function Page() {
   }
 
   const prepared = useMemo(() => {
-    const sameNameCountMap: Record<string, number> = {};
-    for (const it of items) {
-      const normTitle = (it.title || "").trim().toLowerCase();
-      sameNameCountMap[normTitle] = (sameNameCountMap[normTitle] ?? 0) + 1;
-    }
-
-    function parseNaverCoords(it: NaverLocalItem): { lat: number; lng: number } | null {
-      const x = Number.parseFloat(it.mapx || "");
-      const y = Number.parseFloat(it.mapy || "");
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-      const asScaled = { lng: x / 1e7, lat: y / 1e7 };
-      if (asScaled.lat >= 30 && asScaled.lat <= 45 && asScaled.lng >= 120 && asScaled.lng <= 135) {
-        return asScaled;
-      }
-      if (y >= 30 && y <= 45 && x >= 120 && x <= 135) return { lat: y, lng: x };
-      return null;
-    }
-
-    function distanceKm(a: { lat: number; lng: number }, b: { lat: number; lng: number }): number {
-      const toRad = (deg: number) => (deg * Math.PI) / 180;
-      const dLat = toRad(b.lat - a.lat);
-      const dLng = toRad(b.lng - a.lng);
-      const lat1 = toRad(a.lat);
-      const lat2 = toRad(b.lat);
-      const h =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
-      return 6371 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-    }
-
-    function getDistanceBonus(km: number): number {
-      if (km <= 1.5) return 2;
-      if (km <= 4) return 1;
-      return 0;
-    }
-
     const hasRegion = (it: NaverLocalItem) =>
       (it.address || "").includes(region) || (it.roadAddress || "").includes(region);
 
@@ -208,22 +128,10 @@ export default function Page() {
           updatedAt: 0,
         } satisfies PlaceMeta);
 
-      const adSignals = adSignalMap[key] ?? 0;
-      const promoSignals = promoSignalMap[key] ?? 0;
-      const adPenalty = Math.min(2.1, adSignals * 0.7);
-      const promoPenalty = Math.min(1.2, promoSignals * 0.4);
-
-      const coord = parseNaverCoords(it);
-      const distance =
-        useDistanceBonus && userLocation && coord
-          ? distanceKm(userLocation, { lat: coord.lat, lng: coord.lng })
-          : null;
-      const distanceBonus = distance == null ? 0 : getDistanceBonus(distance);
-
-      const normTitle = (it.title || "").trim().toLowerCase();
-      const sameNameCount = sameNameCountMap[normTitle] ?? 1;
-      const nopoDefault = computeNopoScore({ name: it.title, sameNameCount, reviews: [] });
-      const nopo = nopoMap[key] ?? nopoDefault;
+      const searchIndexScore = Math.max(0.5, 5 - idx * 0.5);
+      const adEventPenalty = (penaltySignalMap[key] ?? 0) > 0 ? 1 : 0;
+      const scoreMax = 5.0;
+      const score = Math.max(0, Math.min(scoreMax, searchIndexScore - adEventPenalty));
 
       const hotplace =
         hotplaceMap[key] ??
@@ -236,32 +144,7 @@ export default function Page() {
           multiplier: 1,
         } satisfies HotplaceScoreResult);
 
-      const agePoint = nopo.metrics.agePoint;
-      // Re-scale legacy rule points to a 10-point model.
-      const ageScore =
-        agePoint >= 30 ? 3.0 : agePoint >= 20 ? 2.0 : agePoint >= 10 ? 1.0 : 0.0;
-      const strongKeywordScore = nopo.metrics.strongKeywordPoint;
-      const regularKeywordScore = nopo.metrics.regularKeywordPoint;
-      const searchIndexScore = Math.max(0.2, 2.0 - idx * 0.2);
-      const distanceScore = distanceBonus >= 2 ? 0.5 : distanceBonus >= 1 ? 0.2 : 0.0;
-      const scoreMax = 10.0;
-      const score = Math.max(
-        0.0,
-        Math.min(
-          scoreMax,
-          ageScore +
-            strongKeywordScore +
-            regularKeywordScore +
-            searchIndexScore +
-            distanceScore -
-            adPenalty -
-            promoPenalty,
-        ),
-      );
-
-      const totalNorm = score / scoreMax;
-      const distanceNorm = useDistanceBonus ? distanceBonus / 2 : 0.5;
-      const hybridScore = 0.55 * nopo.nopoScore + 0.25 * totalNorm + 0.2 * distanceNorm;
+      const isHotNow = hotplace.recent3mCount > 0 || hotplace.multiplier > 1;
 
       return {
         it,
@@ -269,50 +152,50 @@ export default function Page() {
         meta,
         score,
         scoreMax,
-        nopoScore: nopo.nopoScore,
-        nopoEvidence: nopo.evidence,
-        hybridScore,
+        searchIndexScore,
+        adEventPenalty,
         hotplaceScore: hotplace.hotplaceScore,
         hotplaceRatioPercent: hotplace.recentRatioPercent,
-        hotplaceRatio: hotplace.recentRatio,
         hotplaceRecentCount: hotplace.recent3mCount,
-        sameNameCount,
-        adSignals,
-        adPenalty,
-        promoPenalty,
-        distance,
-        distanceBonus,
-        scoreDetail: {
-          age: ageScore,
-          strongKeyword: strongKeywordScore,
-          regularKeyword: regularKeywordScore,
-          searchIndex: searchIndexScore,
-          distance: distanceScore,
-          adPenalty,
-          promoPenalty,
-        },
+        hotplaceRatio: hotplace.recentRatio,
+        isHotNow,
       };
     });
 
-    if (nopoMode) {
-      enriched.sort((a, b) => b.nopoScore - a.nopoScore || b.score - a.score);
-    } else {
-      enriched.sort((a, b) => b.score - a.score || b.meta.updatedAt - a.meta.updatedAt);
+    if (viewMode === "hot") {
+      const hotOnly = enriched.filter((e) => e.isHotNow);
+      hotOnly.sort(
+        (a, b) =>
+          b.hotplaceScore - a.hotplaceScore ||
+          b.hotplaceRatio - a.hotplaceRatio ||
+          b.score - a.score,
+      );
+      return hotOnly;
     }
 
+    enriched.sort((a, b) => b.score - a.score || b.meta.updatedAt - a.meta.updatedAt);
     return enriched;
-  }, [
-    items,
-    region,
-    metaMap,
-    adSignalMap,
-    promoSignalMap,
-    nopoMap,
-    hotplaceMap,
-    nopoMode,
-    useDistanceBonus,
-    userLocation,
-  ]);
+  }, [items, region, metaMap, penaltySignalMap, hotplaceMap, viewMode]);
+
+  const topHotplace = useMemo(
+    () =>
+      getTopHotplace(
+        prepared
+          .filter((p) => p.isHotNow)
+          .map((p) => ({
+            name: p.it.title,
+            score: {
+              hotplaceScore: p.hotplaceScore,
+              recentRatio: p.hotplaceRatio,
+              recentRatioPercent: p.hotplaceRatioPercent,
+              recent3mCount: p.hotplaceRecentCount,
+              totalReviewCount: 0,
+              multiplier: p.hotplaceScore > 0 ? 1 : 0,
+            },
+          })),
+      ),
+    [prepared],
+  );
 
   return (
     <div
@@ -398,74 +281,62 @@ export default function Page() {
             </button>
           </div>
 
-          <div
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 8,
-              marginBottom: 10,
-              padding: "7px 10px",
-              border: "1px solid #e5e7eb",
-              borderRadius: 10,
-              background: "#fff",
-            }}
-          >
-            <input
-              id="distance-bonus-toggle"
-              type="checkbox"
-              checked={useDistanceBonus}
-              onChange={(e) => {
-                const next = e.target.checked;
-                setUseDistanceBonus(next);
-                if (next) requestLocation();
-              }}
-            />
-            <label
-              htmlFor="distance-bonus-toggle"
-              style={{ fontSize: 13, color: "#374151", fontWeight: 700, cursor: "pointer" }}
-            >
-              가까운 곳 우선 (위치 가점)
-            </label>
-          </div>
-          {useDistanceBonus && locating ? (
-            <div style={{ marginTop: -4, marginBottom: 10, fontSize: 12, color: "#4b5563" }}>위치 확인중...</div>
-          ) : null}
-          {useDistanceBonus && locationError ? (
-            <div style={{ marginTop: -4, marginBottom: 10, fontSize: 12, color: "#b91c1c" }}>
-              {locationError}
-            </div>
-          ) : null}
-          {useDistanceBonus && userLocation ? (
-            <div style={{ marginTop: -4, marginBottom: 10, fontSize: 12, color: "#4b5563" }}>
-              위치 기반 거리 가점 활성화됨
-            </div>
-          ) : null}
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
-              onClick={() => setNopoMode((v) => !v)}
+              onClick={() => setViewMode("base")}
               style={{
                 padding: "6px 10px",
                 borderRadius: 999,
                 border: "1px solid #0f766e",
-                background: nopoMode ? "#0f766e" : "#ffffff",
-                color: nopoMode ? "#fff" : "#0f766e",
+                background: viewMode === "base" ? "#0f766e" : "#ffffff",
+                color: viewMode === "base" ? "#fff" : "#0f766e",
                 fontWeight: 800,
                 fontSize: 12,
               }}
             >
-              노포모드 {nopoMode ? "ON" : "OFF"}
+              기본(노포맛집)
+            </button>
+            <button
+              onClick={() => setViewMode("hot")}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: "1px solid #b45309",
+                background: viewMode === "hot" ? "#b45309" : "#ffffff",
+                color: viewMode === "hot" ? "#fff" : "#b45309",
+                fontWeight: 800,
+                fontSize: 12,
+              }}
+            >
+              핫플
             </button>
           </div>
-
         </div>
 
         {loading ? <div style={{ padding: 12, color: "#6b7280" }}>검색중...</div> : null}
         {error ? <div style={{ padding: 12, color: "#b91c1c" }}>{error}</div> : null}
 
-        {!loading && !error && items.length > 0 && prepared.length === 0 ? (
-          <div style={{ padding: 12, color: "#6b7280" }}>결과가 없습니다.</div>
+        {!loading && !error && viewMode === "hot" && topHotplace ? (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #fdba74",
+              background: "#fff7ed",
+              color: "#9a3412",
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            최근 인기 가게: {topHotplace.name} · 지수 {topHotplace.score.hotplaceScore.toFixed(0)} · 최근 3개월 비율 {topHotplace.score.recentRatioPercent.toFixed(0)}%
+          </div>
         ) : null}
+
+        {!loading && !error && items.length > 0 && prepared.length === 0 ? (
+          <div style={{ padding: 12, color: "#6b7280" }}>핫플 조건에 맞는 결과가 없습니다.</div>
+        ) : null}
+
         <div style={{ marginTop: 14 }}>
           {prepared.map(
             ({
@@ -474,17 +345,12 @@ export default function Page() {
               meta,
               score,
               scoreMax,
-              nopoScore,
-              nopoEvidence,
-              sameNameCount,
+              searchIndexScore,
+              adEventPenalty,
               hotplaceScore,
               hotplaceRatioPercent,
-              adSignals,
-              adPenalty,
-              promoPenalty,
-              distance,
-              distanceBonus,
-              scoreDetail,
+              hotplaceRecentCount,
+              isHotNow,
             }) => (
               <PlaceCard
                 key={key}
@@ -492,22 +358,15 @@ export default function Page() {
                 meta={meta}
                 score={score}
                 scoreMax={scoreMax}
-                nopoScore={nopoScore}
-                nopoEvidence={nopoEvidence}
+                searchIndexScore={searchIndexScore}
+                adEventPenalty={adEventPenalty}
                 hotplaceScore={hotplaceScore}
                 hotplaceRatioPercent={hotplaceRatioPercent}
+                hotplaceRecentCount={hotplaceRecentCount}
+                isHotNow={isHotNow}
                 region={region}
-                adSignals={adSignals}
-                adPenalty={adPenalty}
-                promoPenalty={promoPenalty}
-                distanceKm={distance}
-                distanceBonus={distanceBonus}
-                scoreDetail={scoreDetail}
-                onAdSignal={updateAdSignal}
-                onPromoSignal={updatePromoSignal}
-                onNopoUpdate={updateNopo}
+                onPenaltySignal={updatePenaltySignal}
                 onHotplaceUpdate={updateHotplace}
-                sameNameCount={sameNameCount}
                 onUpdate={updateMeta}
               />
             ),

@@ -1,9 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
 import type { NaverBlogItem, NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
-import { computeNopoScore, type NopoResult } from "../lib/nopo";
 import { calculateHotplaceScore, type HotplaceScoreResult } from "../lib/hotplace";
 
 type Region = "수원" | "여수" | "대구";
@@ -13,54 +12,20 @@ type Props = {
   meta: PlaceMeta;
   score: number;
   scoreMax: number;
-  nopoScore: number;
-  nopoEvidence: string[];
+  searchIndexScore: number;
+  adEventPenalty: number;
   hotplaceScore: number;
   hotplaceRatioPercent: number;
+  hotplaceRecentCount: number;
+  isHotNow: boolean;
   region: Region;
-  adSignals: number;
-  adPenalty: number;
-  promoPenalty: number;
-  distanceKm: number | null;
-  distanceBonus: number;
-  scoreDetail: {
-    age: number;
-    strongKeyword: number;
-    regularKeyword: number;
-    searchIndex: number;
-    distance: number;
-    adPenalty: number;
-    promoPenalty: number;
-  };
-  onAdSignal: (key: string, suspiciousCount: number) => void;
-  onPromoSignal: (key: string, eventCount: number) => void;
-  onNopoUpdate: (key: string, result: NopoResult) => void;
+  onPenaltySignal: (key: string, detected: number) => void;
   onHotplaceUpdate: (key: string, result: HotplaceScoreResult) => void;
-  sameNameCount: number;
   onUpdate: (key: string, nextMeta: PlaceMeta) => void;
 };
 
 const TAGS = ["혼밥", "데이트", "가족", "회식", "가성비"] as const;
-const AD_PATTERNS = [
-  /협찬/,
-  /광고/,
-  /제공받아/,
-  /원고료/,
-  /파트너스/,
-  /체험단/,
-  /지원받아/,
-  /유료\s*광고/,
-  /업체로부터/,
-] as const;
-const PROMO_PATTERNS = [
-  /영수증\s*리뷰/,
-  /리뷰\s*이벤트/,
-  /방문자\s*리뷰/,
-  /포토\s*리뷰/,
-  /쿠폰\s*증정/,
-  /서비스\s*제공/,
-  /리뷰\s*작성\s*시/,
-] as const;
+const PENALTY_PATTERNS = [/협찬/, /제공/, /광고/, /체험단/, /리뷰\s*이벤트/, /원고료/] as const;
 
 function extractSigungu(address: string): string {
   if (!address) return "";
@@ -69,14 +34,9 @@ function extractSigungu(address: string): string {
   return sigungu.slice(0, 3).join(" ");
 }
 
-function hasSponsoredPhrase(s: string): boolean {
+function hasPenaltyPhrase(s: string): boolean {
   const text = (s || "").toLowerCase();
-  return AD_PATTERNS.some((pattern) => pattern.test(text));
-}
-
-function hasPromoPhrase(s: string): boolean {
-  const text = (s || "").toLowerCase();
-  return PROMO_PATTERNS.some((pattern) => pattern.test(text));
+  return PENALTY_PATTERNS.some((pattern) => pattern.test(text));
 }
 
 export default function PlaceCard({
@@ -84,22 +44,15 @@ export default function PlaceCard({
   meta,
   score,
   scoreMax,
-  nopoScore,
-  nopoEvidence,
+  searchIndexScore,
+  adEventPenalty,
   hotplaceScore,
   hotplaceRatioPercent,
+  hotplaceRecentCount,
+  isHotNow,
   region,
-  adSignals,
-  adPenalty,
-  promoPenalty,
-  distanceKm,
-  distanceBonus,
-  scoreDetail,
-  onAdSignal,
-  onPromoSignal,
-  onNopoUpdate,
+  onPenaltySignal,
   onHotplaceUpdate,
-  sameNameCount,
   onUpdate,
 }: Props) {
   const key = placeKey(item);
@@ -138,10 +91,11 @@ export default function PlaceCard({
         if (!mounted) return;
         if (!res.ok) {
           setBlogs([]);
-          onAdSignal(key, 0);
-          onPromoSignal(key, 0);
+          onPenaltySignal(key, 0);
+          onHotplaceUpdate(key, calculateHotplaceScore([]));
           return;
         }
+
         const list: NaverBlogItem[] = (Array.isArray(data?.items) ? data.items : []).slice(0, 3);
         setBlogs(list);
 
@@ -155,39 +109,11 @@ export default function PlaceCard({
           ),
         );
 
-        const suspiciousCount = list.filter((b: NaverBlogItem) => {
-          const merged = `${b.title || ""} ${b.description || ""}`;
-          return hasSponsoredPhrase(merged);
-        }).length;
-        onAdSignal(key, suspiciousCount);
-
-        const promoCount = list.filter((b: NaverBlogItem) => {
-          const merged = `${b.title || ""} ${b.description || ""}`;
-          return hasPromoPhrase(merged);
-        }).length;
-        onPromoSignal(key, promoCount);
-
-        const nopoResult = computeNopoScore({
-          name: item.title,
-          sameNameCount,
-          reviews: list.map((b) => ({
-            text: `${b.title || ""} ${b.description || ""}`,
-            createdAt: b.postdate,
-          })),
-        });
-        onNopoUpdate(key, nopoResult);
+        const merged = list.map((b) => `${b.title || ""} ${b.description || ""}`).join(" ");
+        onPenaltySignal(key, hasPenaltyPhrase(merged) ? 1 : 0);
       } catch {
         if (mounted) setBlogs([]);
-        onAdSignal(key, 0);
-        onPromoSignal(key, 0);
-        onNopoUpdate(
-          key,
-          computeNopoScore({
-            name: item.title,
-            sameNameCount,
-            reviews: [],
-          }),
-        );
+        onPenaltySignal(key, 0);
         onHotplaceUpdate(key, calculateHotplaceScore([]));
       } finally {
         if (mounted) setLoadingBlogs(false);
@@ -197,25 +123,13 @@ export default function PlaceCard({
     return () => {
       mounted = false;
     };
-  }, [
-    item.title,
-    region,
-    key,
-    onAdSignal,
-    onPromoSignal,
-    onNopoUpdate,
-    onHotplaceUpdate,
-    sameNameCount,
-  ]);
+  }, [item.title, region, key, onPenaltySignal, onHotplaceUpdate]);
 
   useEffect(() => {
     let mounted = true;
     const run = async () => {
       try {
-        const params = new URLSearchParams({
-          query: item.title,
-          region,
-        });
+        const params = new URLSearchParams({ query: item.title, region });
         const res = await fetch(`/api/naver/image?${params.toString()}`);
         const data = await res.json().catch(() => null);
         if (!mounted) return;
@@ -253,9 +167,7 @@ export default function PlaceCard({
               <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1.2, color: "#111827" }}>{item.title}</div>
               <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>{item.category}</div>
               <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>{addr}</div>
-              {item.telephone ? (
-                <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>{item.telephone}</div>
-              ) : null}
+              {item.telephone ? <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>{item.telephone}</div> : null}
             </div>
 
             <div
@@ -301,28 +213,10 @@ export default function PlaceCard({
           <div style={{ fontWeight: 900, fontSize: 22, color: "#0f172a" }}>
             {score.toFixed(1)}/{scoreMax.toFixed(1)}점
           </div>
-          <div style={{ fontSize: 12, color: "#6b7280" }}>로컬 점수</div>
-          <div style={{ marginTop: 4, fontSize: 11, color: "#0f766e", fontWeight: 800 }}>
-            노포지수 {(nopoScore * 100).toFixed(0)}%
-          </div>
+          <div style={{ fontSize: 12, color: "#6b7280" }}>노포 점수(기본)</div>
           <div style={{ marginTop: 3, fontSize: 11, color: "#b45309", fontWeight: 800 }}>
             핫플지수 {hotplaceScore.toFixed(0)} ({hotplaceRatioPercent.toFixed(0)}%)
           </div>
-          {distanceKm != null ? (
-            <div style={{ marginTop: 5, fontSize: 11, color: "#2563eb", fontWeight: 800 }}>
-              {distanceKm.toFixed(1)}km · 거리+{distanceBonus}
-            </div>
-          ) : null}
-          {adPenalty > 0 ? (
-            <div style={{ marginTop: 5, fontSize: 11, color: "#b91c1c", fontWeight: 800 }}>
-              광고감점 -{adPenalty}
-            </div>
-          ) : null}
-          {promoPenalty > 0 ? (
-            <div style={{ marginTop: 3, fontSize: 11, color: "#b91c1c", fontWeight: 800 }}>
-              이벤트감점 -{promoPenalty}
-            </div>
-          ) : null}
         </div>
       </div>
 
@@ -340,32 +234,26 @@ export default function PlaceCard({
           flexWrap: "wrap",
         }}
       >
-        <span>업력 +{scoreDetail.age.toFixed(1)}</span>
-        <span>현지키워드 +{scoreDetail.strongKeyword.toFixed(1)}</span>
-        <span>노포키워드 +{scoreDetail.regularKeyword.toFixed(1)}</span>
-        <span>검색지수 +{scoreDetail.searchIndex.toFixed(1)}</span>
-        <span>거리 +{scoreDetail.distance.toFixed(1)}</span>
-        <span>광고감점 -{scoreDetail.adPenalty.toFixed(1)}</span>
-        <span>이벤트감점 -{scoreDetail.promoPenalty.toFixed(1)}</span>
+        <span>검색지수 +{searchIndexScore.toFixed(1)}</span>
+        <span>광고/이벤트 감점 -{adEventPenalty.toFixed(1)}</span>
       </div>
 
       <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {(nopoEvidence.length > 0 ? nopoEvidence : ["노포 근거 데이터 보강 필요"]).map((ev) => (
+        {isHotNow ? (
           <span
-            key={ev}
             style={{
               padding: "5px 9px",
               borderRadius: 999,
               fontSize: 11,
-              fontWeight: 700,
-              background: "#f8fafc",
-              color: "#334155",
-              border: "1px solid #cbd5e1",
+              fontWeight: 800,
+              background: "#fff7ed",
+              color: "#9a3412",
+              border: "1px solid #fdba74",
             }}
           >
-            {ev}
+            핫플 마크 · 최근 3개월 리뷰 {hotplaceRecentCount}건
           </span>
-        ))}
+        ) : null}
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
@@ -465,9 +353,6 @@ export default function PlaceCard({
       <div style={{ marginTop: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: "#374151" }}>최신 블로그 후기</div>
-          <div style={{ fontSize: 11, color: adSignals > 0 ? "#b91c1c" : "#6b7280", fontWeight: 700 }}>
-            {adSignals > 0 ? `협찬/광고 문구 ${adSignals}건 감지` : "협찬/광고 문구 미감지"}
-          </div>
         </div>
         {loadingBlogs ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>불러오는 중...</div>
