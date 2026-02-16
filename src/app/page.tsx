@@ -31,6 +31,12 @@ const NON_FOOD_CATEGORY_PATTERNS = [
   /숙박/,
   /호텔/,
   /펜션/,
+  /다이소/,
+  /종합생활용품/,
+  /생활용품/,
+  /문구/,
+  /마트/,
+  /편의점/,
 ];
 const FOOD_CATEGORY_PATTERNS = [
   /음식점/,
@@ -51,6 +57,25 @@ const FOOD_CATEGORY_PATTERNS = [
   /포차/,
   /디저트/,
   /베이커리/,
+  /요리/,
+  /패스트푸드/,
+  /햄버거/,
+  /돈가스/,
+  /초밥/,
+  /국수/,
+  /냉면/,
+  /찌개/,
+  /전골/,
+  /곱창/,
+  /삼겹살/,
+  /갈비/,
+  /쌈밥/,
+  /뷔페/,
+  /닭갈비/,
+  /쭈꾸미/,
+  /횟집/,
+  /해물/,
+  /샤브/,
 ];
 
 function toRadians(degree: number): number {
@@ -76,10 +101,9 @@ function parseMapCoordinate(raw: string): number | null {
 
 function isFoodPlace(it: NaverLocalItem): boolean {
   const category = (it.category || "").trim();
-  if (!category) return true;
+  if (!category) return false;
   if (NON_FOOD_CATEGORY_PATTERNS.some((p) => p.test(category))) return false;
-  if (FOOD_CATEGORY_PATTERNS.some((p) => p.test(category))) return true;
-  return !/센터|기관|학교|병원|약국|은행|호텔|모텔|공공|관공서/.test(category);
+  return FOOD_CATEGORY_PATTERNS.some((p) => p.test(category));
 }
 
 export default function Page() {
@@ -345,7 +369,7 @@ export default function Page() {
           <div style={{ margin: "8px 0 14px", display: "flex", alignItems: "center", gap: 10 }}>
             <h1 style={{ margin: 0, fontSize: 30, fontWeight: 900, color: "#111827" }}>로컬 맛집찾기</h1>
             <img
-              src="/title-mascot.svg"
+              src="/title-user.jpg"
               alt="로컬 맛집찾기 마스코트"
               style={{ width: 44, height: 44, borderRadius: 10, objectFit: "cover", border: "1px solid #d1d5db" }}
             />

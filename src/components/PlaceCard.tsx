@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { NaverBlogItem, NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 import { calculateHotplaceScore, type HotplaceScoreResult } from "../lib/hotplace";
@@ -60,6 +60,8 @@ export default function PlaceCard({
   onUpdate,
 }: Props) {
   const key = placeKey(item);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+  const [shouldLoadDetails, setShouldLoadDetails] = useState(false);
   const [blogs, setBlogs] = useState<NaverBlogItem[]>([]);
   const [loadingBlogs, setLoadingBlogs] = useState(false);
   const [menuImage, setMenuImage] = useState<string>("");
@@ -74,6 +76,30 @@ export default function PlaceCard({
   }
 
   useEffect(() => {
+    const node = cardRef.current;
+    if (!node || shouldLoadDetails) return;
+    if (typeof window === "undefined" || !("IntersectionObserver" in window)) {
+      setShouldLoadDetails(true);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
+          setShouldLoadDetails(true);
+          observer.disconnect();
+          break;
+        }
+      },
+      { rootMargin: "240px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [shouldLoadDetails]);
+
+  useEffect(() => {
+    if (!shouldLoadDetails) return;
     let mounted = true;
     const run = async () => {
       setLoadingBlogs(true);
@@ -121,9 +147,10 @@ export default function PlaceCard({
     return () => {
       mounted = false;
     };
-  }, [item.title, region, key, onPenaltySignal, onHotplaceUpdate]);
+  }, [item.title, region, key, onPenaltySignal, onHotplaceUpdate, shouldLoadDetails]);
 
   useEffect(() => {
+    if (!shouldLoadDetails) return;
     let mounted = true;
     const run = async () => {
       try {
@@ -151,10 +178,11 @@ export default function PlaceCard({
     return () => {
       mounted = false;
     };
-  }, [item.title, addr, region]);
+  }, [item.title, addr, region, shouldLoadDetails]);
 
   return (
     <div
+      ref={cardRef}
       style={{
         border: "1px solid #e5e7eb",
         borderRadius: 18,
@@ -305,7 +333,9 @@ export default function PlaceCard({
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <div style={{ fontSize: 12, fontWeight: 800, color: "#374151" }}>최신 블로그 후기</div>
         </div>
-        {loadingBlogs ? (
+        {!shouldLoadDetails ? (
+          <div style={{ fontSize: 12, color: "#6b7280" }}>카드가 보이면 불러옵니다.</div>
+        ) : loadingBlogs ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>불러오는 중...</div>
         ) : blogs.length === 0 ? (
           <div style={{ fontSize: 12, color: "#6b7280" }}>후기 링크가 없습니다.</div>

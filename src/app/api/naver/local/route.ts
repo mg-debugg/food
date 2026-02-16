@@ -14,6 +14,79 @@ function clampInt(input: string, min: number, max: number, fallback: number): nu
   return Math.min(max, Math.max(min, n));
 }
 
+const NON_FOOD_CATEGORY_PATTERNS = [
+  /행정복지센터/,
+  /주민센터/,
+  /구청/,
+  /시청/,
+  /공공/,
+  /사회기관/,
+  /관공서/,
+  /복지/,
+  /병원/,
+  /약국/,
+  /학교/,
+  /학원/,
+  /부동산/,
+  /은행/,
+  /숙박/,
+  /호텔/,
+  /펜션/,
+  /다이소/,
+  /종합생활용품/,
+  /생활용품/,
+  /문구/,
+  /마트/,
+  /편의점/,
+];
+
+const FOOD_CATEGORY_PATTERNS = [
+  /음식점/,
+  /한식/,
+  /중식/,
+  /일식/,
+  /양식/,
+  /카페/,
+  /분식/,
+  /치킨/,
+  /피자/,
+  /족발/,
+  /보쌈/,
+  /국밥/,
+  /해장국/,
+  /고기/,
+  /술집/,
+  /포차/,
+  /디저트/,
+  /베이커리/,
+  /요리/,
+  /패스트푸드/,
+  /햄버거/,
+  /돈가스/,
+  /초밥/,
+  /국수/,
+  /냉면/,
+  /찌개/,
+  /전골/,
+  /곱창/,
+  /삼겹살/,
+  /갈비/,
+  /쌈밥/,
+  /뷔페/,
+  /닭갈비/,
+  /쭈꾸미/,
+  /횟집/,
+  /해물/,
+  /샤브/,
+];
+
+function isFoodCategory(rawCategory: unknown): boolean {
+  const category = String(rawCategory ?? "").trim();
+  if (!category) return false;
+  if (NON_FOOD_CATEGORY_PATTERNS.some((p) => p.test(category))) return false;
+  return FOOD_CATEGORY_PATTERNS.some((p) => p.test(category));
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const sp = url.searchParams;
@@ -89,6 +162,7 @@ export async function GET(req: Request) {
           ...raw,
           title: stripHtmlTags(String(raw?.title ?? "")),
         };
+        if (!isFoodCategory(it.category)) continue;
         const key = `${it.title}|${it.roadAddress || it.address || ""}`;
         if (seen.has(key)) continue;
         seen.add(key);
@@ -112,6 +186,7 @@ export async function GET(req: Request) {
             ...raw,
             title: stripHtmlTags(String(raw?.title ?? "")),
           };
+          if (!isFoodCategory(it.category)) continue;
           const key = `${it.title}|${it.roadAddress || it.address || ""}`;
           if (seen.has(key)) continue;
           seen.add(key);

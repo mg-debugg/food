@@ -14,6 +14,20 @@ type MapRestaurantSummary = {
   imageUrls?: string[];
 };
 
+type ImageResponsePayload = {
+  image: string;
+  width: number;
+  height: number;
+  foundFood: boolean;
+  isHighResolution: boolean;
+  source: "naver-map";
+  item: MapRestaurantSummary | null;
+};
+
+const IMAGE_CACHE_TTL_MS = 10 * 60 * 1000;
+const imageCache = new Map<string, { expiresAt: number; payload: ImageResponsePayload }>();
+const inFlight = new Map<string, Promise<ImageResponsePayload>>();
+
 function normalizeText(input: string): string {
   return String(input || "")
     .toLowerCase()
@@ -32,12 +46,56 @@ function decodeNaverEscapedUrl(raw: string): string {
 }
 
 function extractApolloState(html: string): Record<string, unknown> | null {
-  const match = html.match(
-    /window\.__APOLLO_STATE__\s*=\s*(\{[\s\S]*?\})\s*;\s*window\.__LOCATION_STATE__/,
-  );
-  if (!match?.[1]) return null;
+  const marker = "window.__APOLLO_STATE__";
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex < 0) return null;
+
+  const equalIndex = html.indexOf("=", markerIndex);
+  if (equalIndex < 0) return null;
+
+  const start = html.indexOf("{", equalIndex);
+  if (start < 0) return null;
+
+  let inString = false;
+  let escaping = false;
+  let depth = 0;
+  let end = -1;
+
+  for (let i = start; i < html.length; i += 1) {
+    const ch = html[i];
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (ch === "\\") {
+        escaping = true;
+      } else if (ch === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === "\"") {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      depth += 1;
+      continue;
+    }
+    if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+
+  if (end < 0) return null;
+
+  const raw = html.slice(start, end + 1);
   try {
-    return JSON.parse(match[1]) as Record<string, unknown>;
+    return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return null;
   }
@@ -123,12 +181,22 @@ export async function GET(req: Request) {
   const region: Region = ALLOWED_REGIONS.includes(regionRaw as Region)
     ? (regionRaw as Region)
     : "수원";
+  const cacheKey = `${region}::${name}::${address}`;
 
   if (!name) {
     return Response.json(
       { error: "name parameter is required" },
       { status: 400, headers: { "Cache-Control": "no-store" } },
     );
+  }
+
+  const now = Date.now();
+  const cached = imageCache.get(cacheKey);
+  if (cached && cached.expiresAt > now) {
+    return Response.json(cached.payload, { headers: { "Cache-Control": "no-store" } });
+  }
+  if (cached && cached.expiresAt <= now) {
+    imageCache.delete(cacheKey);
   }
 
   const queries = [
@@ -138,61 +206,67 @@ export async function GET(req: Request) {
   ];
 
   try {
-    let best:
-      | {
-          image: string;
-          width: number;
-          height: number;
-          foundFood: boolean;
-          isHighResolution: boolean;
-          source: "naver-map";
-          item: MapRestaurantSummary;
-        }
-      | null = null;
+    const existing = inFlight.get(cacheKey);
+    if (existing) {
+      const payload = await existing;
+      return Response.json(payload, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    const worker = (async (): Promise<ImageResponsePayload> => {
+      let best:
+        | {
+            image: string;
+            width: number;
+            height: number;
+            foundFood: boolean;
+            isHighResolution: boolean;
+            source: "naver-map";
+            item: MapRestaurantSummary;
+          }
+        | null = null;
 
     const normalizedName = normalizeText(name);
     const normalizedAddress = normalizeText(address);
 
-    for (const q of queries) {
-      if (!q.trim()) continue;
-      const mapResult = await fetchMapRepresentativeImage(q, region);
-      if (!mapResult) continue;
+      for (const q of queries) {
+        if (!q.trim()) continue;
+        const mapResult = await fetchMapRepresentativeImage(q, region);
+        if (!mapResult) continue;
 
-      const candidates = collectCandidates(mapResult.apollo);
-      if (candidates.length === 0) continue;
+        const candidates = collectCandidates(mapResult.apollo);
+        if (candidates.length === 0) continue;
 
-      const ranked = candidates
-        .map((item) => {
-          const imagePrimary = decodeNaverEscapedUrl(String(item.imageUrl || ""));
-          const imageFromList = decodeNaverEscapedUrl(String(item.imageUrls?.[0] || ""));
-          const image = isHttpUrl(imagePrimary) ? imagePrimary : imageFromList;
-          return {
-            item,
-            image,
-            score: scoreCandidate(item, normalizedName, normalizedAddress, region),
-          };
-        })
-        .filter((it) => isHttpUrl(it.image))
-        .sort((a, b) => b.score - a.score);
+        const ranked = candidates
+          .map((item) => {
+            const imagePrimary = decodeNaverEscapedUrl(String(item.imageUrl || ""));
+            const imageFromList = decodeNaverEscapedUrl(String(item.imageUrls?.[0] || ""));
+            const image = isHttpUrl(imagePrimary) ? imagePrimary : imageFromList;
+            return {
+              item,
+              image,
+              score: scoreCandidate(item, normalizedName, normalizedAddress, region),
+            };
+          })
+          .filter((it) => isHttpUrl(it.image))
+          .sort((a, b) => b.score - a.score);
 
-      const top = ranked[0];
-      if (!top) continue;
+        const top = ranked[0];
+        if (!top) continue;
 
-      best = {
-        image: top.image,
-        width: 0,
-        height: 0,
-        foundFood: true,
-        isHighResolution: true,
-        source: "naver-map",
-        item: top.item,
-      };
-      break;
-    }
+        best = {
+          image: top.image,
+          width: 0,
+          height: 0,
+          foundFood: true,
+          isHighResolution: true,
+          source: "naver-map",
+          item: top.item,
+        };
+        break;
+      }
 
-    if (!best) {
-      return Response.json(
-        {
+      if (!best) {
+        return {
           image: "",
           width: 0,
           height: 0,
@@ -200,12 +274,15 @@ export async function GET(req: Request) {
           isHighResolution: false,
           source: "naver-map",
           item: null,
-        },
-        { headers: { "Cache-Control": "no-store" } },
-      );
-    }
+        };
+      }
+      return best;
+    })();
 
-    return Response.json(best, { headers: { "Cache-Control": "no-store" } });
+    inFlight.set(cacheKey, worker);
+    const payload = await worker;
+    imageCache.set(cacheKey, { expiresAt: now + IMAGE_CACHE_TTL_MS, payload });
+    return Response.json(payload, { headers: { "Cache-Control": "no-store" } });
   } catch (err: any) {
     return Response.json(
       {
@@ -214,5 +291,7 @@ export async function GET(req: Request) {
       },
       { status: 500, headers: { "Cache-Control": "no-store" } },
     );
+  } finally {
+    inFlight.delete(cacheKey);
   }
 }
