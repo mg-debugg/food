@@ -316,10 +316,11 @@ export default function PlaceCard({
           flexWrap: "wrap",
         }}
       >
-        <span>찜 {scoreDetail.saved}</span>
-        <span>재방문 {scoreDetail.revisit}</span>
-        <span>태그 {scoreDetail.tags}</span>
-        <span>거리 {scoreDetail.distance}</span>
+        <span>찜 {scoreDetail.saved}/5</span>
+        <span>재방문 {scoreDetail.revisit}/3</span>
+        <span>태그 {scoreDetail.tags}/5</span>
+        <span>거리 {scoreDetail.distance}/2</span>
+        <span>검색순위 {scoreDetail.rankBoost}/10</span>
         <span>광고감점 -{scoreDetail.adPenalty}</span>
       </div>
 

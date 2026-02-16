@@ -194,14 +194,15 @@ export default function Page() {
       const savedScore = meta.saved ? 5 : 0;
       const revisitScore = Math.min(3, meta.revisitCount);
       const tagScore = Math.min(5, meta.tags.length);
-      const baseScore = savedScore + revisitScore + tagScore + distanceBonus;
-      const score = Math.max(0, Math.min(15, baseScore - adPenalty));
+      const scoreMax = 25;
+      const baseScore = savedScore + revisitScore + tagScore + distanceBonus + rankBoost;
+      const score = Math.max(0, Math.min(scoreMax, baseScore - adPenalty));
       return {
         it,
         key,
         meta,
         score,
-        scoreMax: 15,
+        scoreMax,
         adSignals,
         adPenalty,
         distance,
