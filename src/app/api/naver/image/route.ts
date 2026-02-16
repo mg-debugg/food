@@ -3,162 +3,215 @@ export const runtime = "nodejs";
 const ALLOWED_REGIONS = ["수원", "대구", "여수", "광명"] as const;
 type Region = (typeof ALLOWED_REGIONS)[number];
 
-function stripHtmlTags(s: string): string {
-  if (!s) return "";
-  return s.replace(/<[^>]*>/g, "");
-}
+type MapRestaurantSummary = {
+  __typename: "RestaurantListSummary";
+  name?: string;
+  businessCategory?: string;
+  roadAddress?: string;
+  address?: string;
+  commonAddress?: string;
+  imageUrl?: string;
+  imageUrls?: string[];
+};
 
-function toInt(input: unknown): number {
-  const n = Number.parseInt(String(input ?? ""), 10);
-  return Number.isFinite(n) ? n : 0;
+function normalizeText(input: string): string {
+  return String(input || "")
+    .toLowerCase()
+    .replace(/<[^>]*>/g, "")
+    .replace(/\s+/g, "")
+    .replace(/[^\p{L}\p{N}]/gu, "");
 }
 
 function isHttpUrl(s: string): boolean {
   return s.startsWith("http://") || s.startsWith("https://");
 }
 
-const FOOD_KEYWORDS = [
-  "음식",
-  "요리",
-  "맛집",
-  "메뉴",
-  "식당",
-  "한식",
-  "중식",
-  "일식",
-  "양식",
-  "디저트",
-  "카페",
-];
+function decodeNaverEscapedUrl(raw: string): string {
+  if (!raw) return "";
+  return raw.replace(/\\u002F/g, "/").replace(/\\u0026/g, "&");
+}
 
-const NON_FOOD_KEYWORDS = [
-  "간판",
-  "외관",
-  "내부",
-  "인테리어",
-  "지도",
-  "로고",
-  "명함",
-  "주차장",
-  "전단지",
-];
+function extractApolloState(html: string): Record<string, unknown> | null {
+  const match = html.match(
+    /window\.__APOLLO_STATE__\s*=\s*(\{[\s\S]*?\})\s*;\s*window\.__LOCATION_STATE__/,
+  );
+  if (!match?.[1]) return null;
+  try {
+    return JSON.parse(match[1]) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
-function containsAny(text: string, keywords: string[]): boolean {
-  return keywords.some((k) => text.includes(k));
+function scoreCandidate(
+  candidate: MapRestaurantSummary,
+  normalizedName: string,
+  normalizedAddress: string,
+  region: Region,
+): number {
+  const candidateName = normalizeText(candidate.name || "");
+  const candidateAddress = normalizeText(
+    [candidate.roadAddress, candidate.address, candidate.commonAddress].filter(Boolean).join(" "),
+  );
+  const normalizedRegion = normalizeText(region);
+
+  let score = 0;
+  if (!candidateName) score -= 10;
+  if (candidateName === normalizedName) score += 80;
+  else if (candidateName.includes(normalizedName) || normalizedName.includes(candidateName)) score += 50;
+  else {
+    const overlap = normalizedName
+      .split("")
+      .filter((ch) => candidateName.includes(ch)).length;
+    score += Math.min(20, overlap);
+  }
+
+  if (normalizedAddress && candidateAddress) {
+    if (candidateAddress.includes(normalizedAddress) || normalizedAddress.includes(candidateAddress)) {
+      score += 25;
+    } else if (
+      normalizedAddress.length >= 4 &&
+      candidateAddress.includes(normalizedAddress.slice(0, 4))
+    ) {
+      score += 10;
+    }
+  }
+
+  if (candidateAddress.includes(normalizedRegion)) score += 5;
+  if (candidate.businessCategory === "restaurant") score += 10;
+  return score;
+}
+
+function collectCandidates(apolloState: Record<string, unknown>): MapRestaurantSummary[] {
+  return Object.values(apolloState)
+    .filter((v): v is MapRestaurantSummary => {
+      if (!v || typeof v !== "object") return false;
+      const item = v as MapRestaurantSummary;
+      if (item.__typename !== "RestaurantListSummary") return false;
+      const image = decodeNaverEscapedUrl(String(item.imageUrl || ""));
+      const firstFromList = decodeNaverEscapedUrl(String(item.imageUrls?.[0] || ""));
+      return isHttpUrl(image) || isHttpUrl(firstFromList);
+    });
+}
+
+async function fetchMapRepresentativeImage(query: string, region: Region) {
+  const endpoint = `https://m.place.naver.com/restaurant/list?query=${encodeURIComponent(query)}`;
+  const res = await fetch(endpoint, {
+    method: "GET",
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      Referer: "https://m.place.naver.com/",
+    },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`naver map error (${res.status})`);
+  const html = await res.text();
+  const apollo = extractApolloState(html);
+  if (!apollo) return null;
+  return { apollo, endpoint };
 }
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const sp = url.searchParams;
 
-  const query = (sp.get("query") ?? "").trim();
+  const name = (sp.get("name") ?? "").trim();
+  const address = (sp.get("address") ?? "").trim();
   const regionRaw = (sp.get("region") ?? "수원").trim();
   const region: Region = ALLOWED_REGIONS.includes(regionRaw as Region)
     ? (regionRaw as Region)
     : "수원";
 
-  if (!query) {
+  if (!name) {
     return Response.json(
-      { error: "query parameter is required" },
+      { error: "name parameter is required" },
       { status: 400, headers: { "Cache-Control": "no-store" } },
     );
   }
 
-  const clientId = process.env.NAVER_CLIENT_ID;
-  const clientSecret = process.env.NAVER_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
-    return Response.json(
-      {
-        error:
-          "Missing env. Set NAVER_CLIENT_ID and NAVER_CLIENT_SECRET in .env.local (server only).",
-      },
-      { status: 500, headers: { "Cache-Control": "no-store" } },
-    );
-  }
-
-  const finalQuery = `${region} ${query} 대표메뉴 음식`;
-  const endpoint = `https://openapi.naver.com/v1/search/image.json?query=${encodeURIComponent(
-    finalQuery,
-  )}&display=20&start=1&sort=sim`;
+  const queries = [
+    `${region} ${name}`,
+    `${name} ${address}`.trim(),
+    `${region} ${name} 맛집`,
+  ];
 
   try {
-    const res = await fetch(endpoint, {
-      method: "GET",
-      headers: {
-        "X-Naver-Client-Id": clientId,
-        "X-Naver-Client-Secret": clientSecret,
-      },
-      cache: "no-store",
-    });
+    let best:
+      | {
+          image: string;
+          width: number;
+          height: number;
+          foundFood: boolean;
+          isHighResolution: boolean;
+          source: "naver-map";
+          item: MapRestaurantSummary;
+        }
+      | null = null;
 
-    if (!res.ok) {
-      const detail = await res.text().catch(() => "");
+    const normalizedName = normalizeText(name);
+    const normalizedAddress = normalizeText(address);
+
+    for (const q of queries) {
+      if (!q.trim()) continue;
+      const mapResult = await fetchMapRepresentativeImage(q, region);
+      if (!mapResult) continue;
+
+      const candidates = collectCandidates(mapResult.apollo);
+      if (candidates.length === 0) continue;
+
+      const ranked = candidates
+        .map((item) => {
+          const imagePrimary = decodeNaverEscapedUrl(String(item.imageUrl || ""));
+          const imageFromList = decodeNaverEscapedUrl(String(item.imageUrls?.[0] || ""));
+          const image = isHttpUrl(imagePrimary) ? imagePrimary : imageFromList;
+          return {
+            item,
+            image,
+            score: scoreCandidate(item, normalizedName, normalizedAddress, region),
+          };
+        })
+        .filter((it) => isHttpUrl(it.image))
+        .sort((a, b) => b.score - a.score);
+
+      const top = ranked[0];
+      if (!top) continue;
+
+      best = {
+        image: top.image,
+        width: 0,
+        height: 0,
+        foundFood: true,
+        isHighResolution: true,
+        source: "naver-map",
+        item: top.item,
+      };
+      break;
+    }
+
+    if (!best) {
       return Response.json(
-        { error: "naver api error", status: res.status, detail },
-        { status: res.status, headers: { "Cache-Control": "no-store" } },
+        {
+          image: "",
+          width: 0,
+          height: 0,
+          foundFood: false,
+          isHighResolution: false,
+          source: "naver-map",
+          item: null,
+        },
+        { headers: { "Cache-Control": "no-store" } },
       );
     }
 
-    const json = (await res.json()) as any;
-    const items = Array.isArray(json?.items) ? json.items : [];
-    const normalized = items
-      .map((it: any) => ({
-        ...it,
-        title: stripHtmlTags(String(it?.title ?? "")),
-        width: toInt(it?.sizewidth),
-        height: toInt(it?.sizeheight),
-        thumbnail: String(it?.thumbnail ?? ""),
-        link: String(it?.link ?? ""),
-      }))
-      .filter((it: any) => {
-        const link = String(it?.link || it?.thumbnail || "");
-        return link.startsWith("http://") || link.startsWith("https://");
-      });
-
-    const ranked = normalized
-      .map((it: any) => {
-        const text = `${it.title} ${it.link}`.toLowerCase();
-        const hasFoodHint = containsAny(text, FOOD_KEYWORDS);
-        const hasNonFoodHint = containsAny(text, NON_FOOD_KEYWORDS);
-        const sourceUrl = isHttpUrl(it.link) ? it.link : it.thumbnail;
-        const area = Math.max(0, it.width) * Math.max(0, it.height);
-        const qualityScore = area > 0 ? Math.log10(area) : 0;
-        const score =
-          qualityScore +
-          (isHttpUrl(it.link) ? 1 : 0) +
-          (hasFoodHint ? 2 : 0) -
-          (hasNonFoodHint ? 3 : 0);
-        return {
-          ...it,
-          sourceUrl,
-          hasFoodHint,
-          hasNonFoodHint,
-          area,
-          score,
-        };
-      })
-      .filter((it: any) => isHttpUrl(it.sourceUrl))
-      .sort((a: any, b: any) => b.score - a.score || b.area - a.area);
-
-    const first = ranked[0] ?? null;
-    const image = first ? String(first.sourceUrl || "") : "";
-    const isHighResolution = first ? first.width >= 640 && first.height >= 640 : false;
-    const foundFood = first ? first.hasFoodHint && !first.hasNonFoodHint : false;
-
-    return Response.json(
-      {
-        image,
-        foundFood,
-        isHighResolution,
-        width: first?.width ?? 0,
-        height: first?.height ?? 0,
-        item: first ?? null,
-      },
-      { headers: { "Cache-Control": "no-store" } },
-    );
+    return Response.json(best, { headers: { "Cache-Control": "no-store" } });
   } catch (err: any) {
     return Response.json(
-      { error: "unexpected server error", detail: String(err?.message ?? err) },
+      {
+        error: "unexpected server error",
+        detail: String(err?.message ?? err),
+      },
       { status: 500, headers: { "Cache-Control": "no-store" } },
     );
   }

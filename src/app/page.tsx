@@ -91,6 +91,7 @@ export default function Page() {
   const [hotMode, setHotMode] = useState(false);
   const [useNearbyBoost, setUseNearbyBoost] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [locationResolved, setLocationResolved] = useState(false);
 
   const [metaMap, setMetaMap] = useState<Record<string, PlaceMeta>>({});
   const [penaltySignalMap, setPenaltySignalMap] = useState<Record<string, number>>({});
@@ -153,10 +154,9 @@ export default function Page() {
   }, []);
 
   useEffect(() => {
-    if (!useNearbyBoost) return;
-    if (userLocation) return;
+    if (locationResolved || userLocation) return;
     if (typeof window === "undefined" || !navigator.geolocation) {
-      setError("이 브라우저에서는 위치 정보를 지원하지 않습니다.");
+      setLocationResolved(true);
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -165,14 +165,14 @@ export default function Page() {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude,
         });
+        setLocationResolved(true);
       },
       () => {
-        setUseNearbyBoost(false);
-        setError("위치 권한을 허용하면 5km 이내 결과만 표시할 수 있습니다.");
+        setLocationResolved(true);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 120000 },
     );
-  }, [useNearbyBoost, userLocation]);
+  }, [locationResolved, userLocation]);
 
   async function search(nextHotMode: boolean) {
     const q = query.trim();
@@ -208,16 +208,10 @@ export default function Page() {
       (it.address || "").includes(region) || (it.roadAddress || "").includes(region);
 
     const food = items.filter(isFoodPlace);
-    const nonFood = items.filter((it) => !isFoodPlace(it));
     const preferredFood = food.filter(hasRegion);
     const otherFood = food.filter((it) => !hasRegion(it));
 
     let list = preferredFood.length > 0 ? [...preferredFood, ...otherFood] : food;
-    if (list.length < DISPLAY_LIMIT) {
-      const preferredNonFood = nonFood.filter(hasRegion);
-      const otherNonFood = nonFood.filter((it) => !hasRegion(it));
-      list = [...list, ...preferredNonFood, ...otherNonFood];
-    }
     list = list.slice(0, DISPLAY_LIMIT);
 
     const enriched = list.map((it, idx) => {
@@ -348,9 +342,14 @@ export default function Page() {
           <div style={{ fontSize: 12, fontWeight: 800, color: "#92400e", letterSpacing: "0.08em" }}>
             LOCAL DINING PICKER
           </div>
-          <h1 style={{ margin: "8px 0 14px", fontSize: 30, fontWeight: 900, color: "#111827" }}>
-            로컬 맛집찾기
-          </h1>
+          <div style={{ margin: "8px 0 14px", display: "flex", alignItems: "center", gap: 10 }}>
+            <h1 style={{ margin: 0, fontSize: 30, fontWeight: 900, color: "#111827" }}>로컬 맛집찾기</h1>
+            <img
+              src="/title-mascot.svg"
+              alt="로컬 맛집찾기 마스코트"
+              style={{ width: 44, height: 44, borderRadius: 10, objectFit: "cover", border: "1px solid #d1d5db" }}
+            />
+          </div>
 
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
             {REGIONS.map((r) => (
@@ -444,7 +443,6 @@ export default function Page() {
               onChange={(e) => {
                 const checked = e.target.checked;
                 setUseNearbyBoost(checked);
-                if (!checked) setUserLocation(null);
               }}
             />
             5km 이내만 보기 (위치 동의)
@@ -453,8 +451,11 @@ export default function Page() {
 
         {loading ? <div style={{ padding: 12, color: "#6b7280" }}>검색중...</div> : null}
         {error ? <div style={{ padding: 12, color: "#b91c1c" }}>{error}</div> : null}
-        {!loading && !error && useNearbyBoost && !userLocation ? (
+        {!loading && !error && useNearbyBoost && !userLocation && !locationResolved ? (
           <div style={{ padding: 12, color: "#6b7280" }}>현재 위치 확인 중입니다. 확인 후 5km 이내 식당만 표시됩니다.</div>
+        ) : null}
+        {!loading && !error && useNearbyBoost && !userLocation && locationResolved ? (
+          <div style={{ padding: 12, color: "#6b7280" }}>위치 권한이 필요합니다. 권한 허용 후 5km 이내 필터를 사용할 수 있습니다.</div>
         ) : null}
         {!loading && !error && useNearbyBoost && userLocation && prepared.length === 0 ? (
           <div style={{ padding: 12, color: "#6b7280" }}>5km 이내 식당이 없습니다.</div>

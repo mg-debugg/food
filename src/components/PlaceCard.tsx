@@ -128,44 +128,21 @@ export default function PlaceCard({
     const run = async () => {
       try {
         setMenuImage("");
-        const queries = [
-          `${item.title} 대표메뉴 음식 사진`,
-          `${item.title} ${region} 시그니처 메뉴`,
-          `${item.title} ${region} 음식`,
-          `${item.title} 메뉴 사진`,
-          `${item.title} 맛집 음식`,
-        ];
-
-        let bestFood: { url: string; area: number } | null = null;
-        let bestAny: { url: string; area: number } | null = null;
-
-        for (const q of queries) {
-          const params = new URLSearchParams({ query: q, region });
-          const res = await fetch(`/api/naver/image?${params.toString()}`);
-          const data = await res.json().catch(() => null);
-          if (!mounted) return;
-          if (!res.ok) continue;
-
-          const imageUrl = typeof data?.image === "string" ? data.image : "";
-          if (!imageUrl) continue;
-
-          const width = Number(data?.width ?? 0);
-          const height = Number(data?.height ?? 0);
-          const area = Math.max(0, width) * Math.max(0, height);
-          const foundFood = Boolean(data?.foundFood);
-          const isHighResolution = Boolean(data?.isHighResolution);
-
-          if (!bestAny || area > bestAny.area) bestAny = { url: imageUrl, area };
-          if (foundFood && (!bestFood || area > bestFood.area)) bestFood = { url: imageUrl, area };
-
-          // Prefer an image that is both food-related and high resolution.
-          if (foundFood && isHighResolution) {
-            setMenuImage(imageUrl);
-            return;
-          }
+        const params = new URLSearchParams({
+          name: item.title,
+          address: addr,
+          region,
+        });
+        const res = await fetch(`/api/naver/image?${params.toString()}`);
+        const data = await res.json().catch(() => null);
+        if (!mounted) return;
+        if (!res.ok) {
+          setMenuImage("");
+          return;
         }
 
-        setMenuImage(bestFood?.url || bestAny?.url || "");
+        const imageUrl = typeof data?.image === "string" ? data.image : "";
+        setMenuImage(imageUrl);
       } catch {
         if (mounted) setMenuImage("");
       }
@@ -174,7 +151,7 @@ export default function PlaceCard({
     return () => {
       mounted = false;
     };
-  }, [item.title, region]);
+  }, [item.title, addr, region]);
 
   return (
     <div
@@ -258,7 +235,7 @@ export default function PlaceCard({
       >
         <span>검색지수 +{searchIndexScore.toFixed(1)}</span>
         <span>{distanceFromUserKm !== null ? `내 위치 ${distanceFromUserKm.toFixed(1)}km` : "위치 미동의"}</span>
-        <span>광고/이벤트 감점 -{adEventPenalty.toFixed(1)}</span>
+        <span>광고/이벤트 감지 {penaltyDetectedCount}건 · 감점 -{adEventPenalty.toFixed(1)}</span>
       </div>
 
       <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
