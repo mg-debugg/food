@@ -5,6 +5,8 @@ import PlaceCard from "../components/PlaceCard";
 import type { NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 import { loadMeta, saveMeta } from "../lib/storage";
+import { computeNopoScore, type NopoResult } from "../lib/nopo";
+import { getTopHotplace, type HotplaceScoreResult } from "../lib/hotplace";
 
 type Region = "수원" | "여수" | "대구";
 type SortMode = "local" | "random" | "comment";
@@ -22,12 +24,16 @@ export default function Page() {
 
   const [category, setCategory] = useState<CategoryMode>("전체");
   const [sortMode, setSortMode] = useState<SortMode>("local");
+  const [nopoMode, setNopoMode] = useState(false);
+  const [hotplaceMode, setHotplaceMode] = useState(false);
 
   const [metaMap, setMetaMap] = useState<Record<string, PlaceMeta>>({});
   const [adSignalMap, setAdSignalMap] = useState<Record<string, number>>({});
   const [promoSignalMap, setPromoSignalMap] = useState<Record<string, number>>({});
   const [commentRankBonusMap, setCommentRankBonusMap] = useState<Record<string, number>>({});
   const [blogVolumeBonusMap, setBlogVolumeBonusMap] = useState<Record<string, number>>({});
+  const [nopoMap, setNopoMap] = useState<Record<string, NopoResult>>({});
+  const [hotplaceMap, setHotplaceMap] = useState<Record<string, HotplaceScoreResult>>({});
   const [useDistanceBonus, setUseDistanceBonus] = useState(false);
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [locationError, setLocationError] = useState<string | null>(null);
@@ -85,6 +91,31 @@ export default function Page() {
     setBlogVolumeBonusMap((prev) => {
       if ((prev[key] ?? 0) === bonus) return prev;
       return { ...prev, [key]: bonus };
+    });
+  }, []);
+
+  const updateNopo = useCallback((key: string, result: NopoResult) => {
+    setNopoMap((prev) => {
+      const old = prev[key];
+      if (old && old.nopoScore === result.nopoScore && old.evidence.join("|") === result.evidence.join("|")) {
+        return prev;
+      }
+      return { ...prev, [key]: result };
+    });
+  }, []);
+
+  const updateHotplace = useCallback((key: string, result: HotplaceScoreResult) => {
+    setHotplaceMap((prev) => {
+      const old = prev[key];
+      if (
+        old &&
+        old.hotplaceScore === result.hotplaceScore &&
+        old.recentRatio === result.recentRatio &&
+        old.recent3mCount === result.recent3mCount
+      ) {
+        return prev;
+      }
+      return { ...prev, [key]: result };
     });
   }, []);
 
@@ -172,6 +203,12 @@ export default function Page() {
   }
 
   const prepared = useMemo(() => {
+    const sameNameCountMap: Record<string, number> = {};
+    for (const it of items) {
+      const normTitle = (it.title || "").trim().toLowerCase();
+      sameNameCountMap[normTitle] = (sameNameCountMap[normTitle] ?? 0) + 1;
+    }
+
     function parseNaverCoords(it: NaverLocalItem): { lat: number; lng: number } | null {
       const x = Number.parseFloat(it.mapx || "");
       const y = Number.parseFloat(it.mapy || "");
@@ -257,12 +294,41 @@ export default function Page() {
         commentRankBoost +
         blogVolumeBoost;
       const score = Math.max(0, Math.min(scoreMax, baseScore - adPenalty - promoPenalty));
+      const normTitle = (it.title || "").trim().toLowerCase();
+      const sameNameCount = sameNameCountMap[normTitle] ?? 1;
+      const nopoDefault = computeNopoScore({
+        name: it.title,
+        sameNameCount,
+        reviews: [],
+      });
+      const nopo = nopoMap[key] ?? nopoDefault;
+      const hotplace =
+        hotplaceMap[key] ??
+        ({
+          hotplaceScore: 0,
+          recentRatio: 0,
+          recentRatioPercent: 0,
+          recent3mCount: 0,
+          totalReviewCount: 0,
+          multiplier: 1,
+        } satisfies HotplaceScoreResult);
+      const totalNorm = score / Math.max(1, scoreMax);
+      const distanceNorm = useDistanceBonus ? distanceBonus / 2 : 0.5;
+      const hybridScore = 0.55 * nopo.nopoScore + 0.25 * totalNorm + 0.2 * distanceNorm;
       return {
         it,
         key,
         meta,
         score,
         scoreMax,
+        nopoScore: nopo.nopoScore,
+        nopoEvidence: nopo.evidence,
+        hybridScore,
+        hotplaceScore: hotplace.hotplaceScore,
+        hotplaceRatioPercent: hotplace.recentRatioPercent,
+        hotplaceRatio: hotplace.recentRatio,
+        hotplaceRecentCount: hotplace.recent3mCount,
+        sameNameCount,
         adSignals,
         adPenalty,
         promoPenalty,
@@ -282,7 +348,16 @@ export default function Page() {
       };
     });
 
-    if (sortMode === "local") {
+    if (hotplaceMode) {
+      enriched.sort(
+        (a, b) =>
+          b.hotplaceScore - a.hotplaceScore ||
+          b.hotplaceRatio - a.hotplaceRatio ||
+          b.score - a.score,
+      );
+    } else if (nopoMode) {
+      enriched.sort((a, b) => b.hybridScore - a.hybridScore || b.nopoScore - a.nopoScore || b.score - a.score);
+    } else if (sortMode === "local") {
       enriched.sort((a, b) => b.score - a.score || b.meta.updatedAt - a.meta.updatedAt);
     }
 
@@ -297,9 +372,31 @@ export default function Page() {
     promoSignalMap,
     commentRankBonusMap,
     blogVolumeBonusMap,
+    nopoMap,
+    hotplaceMap,
+    nopoMode,
+    hotplaceMode,
     useDistanceBonus,
     userLocation,
   ]);
+
+  const topHotplace = useMemo(
+    () =>
+      getTopHotplace(
+        prepared.map((p) => ({
+          name: p.it.title,
+          score: {
+            hotplaceScore: p.hotplaceScore,
+            recentRatio: p.hotplaceRatio,
+            recentRatioPercent: p.hotplaceRatioPercent,
+            recent3mCount: p.hotplaceRecentCount,
+            totalReviewCount: 0,
+            multiplier: 1,
+          },
+        })),
+      ),
+    [prepared],
+  );
 
   return (
     <div
@@ -403,25 +500,31 @@ export default function Page() {
               </button>
             ) : null}
           </div>
-          <label
+          <div
             style={{
               display: "inline-flex",
               alignItems: "center",
-              gap: 6,
-              marginTop: -4,
+              gap: 8,
               marginBottom: 10,
-              fontSize: 13,
-              color: "#374151",
-              fontWeight: 600,
+              padding: "7px 10px",
+              border: "1px solid #e5e7eb",
+              borderRadius: 10,
+              background: "#fff",
             }}
           >
             <input
+              id="distance-bonus-toggle"
               type="checkbox"
               checked={useDistanceBonus}
               onChange={(e) => setUseDistanceBonus(e.target.checked)}
             />
-            가까운 곳 우선 (위치 가점)
-          </label>
+            <label
+              htmlFor="distance-bonus-toggle"
+              style={{ fontSize: 13, color: "#374151", fontWeight: 700, cursor: "pointer" }}
+            >
+              가까운 곳 우선 (위치 가점)
+            </label>
+          </div>
           {useDistanceBonus && locationError ? (
             <div style={{ marginTop: -4, marginBottom: 10, fontSize: 12, color: "#b91c1c" }}>
               {locationError}
@@ -475,6 +578,46 @@ export default function Page() {
                 {s.label}
               </button>
             ))}
+            <button
+              onClick={() =>
+                setNopoMode((v) => {
+                  const next = !v;
+                  if (next) setHotplaceMode(false);
+                  return next;
+                })
+              }
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: "1px solid #0f766e",
+                background: nopoMode ? "#0f766e" : "#ffffff",
+                color: nopoMode ? "#fff" : "#0f766e",
+                fontWeight: 800,
+                fontSize: 12,
+              }}
+            >
+              노포모드(찐 노포)
+            </button>
+            <button
+              onClick={() =>
+                setHotplaceMode((v) => {
+                  const next = !v;
+                  if (next) setNopoMode(false);
+                  return next;
+                })
+              }
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: "1px solid #b45309",
+                background: hotplaceMode ? "#b45309" : "#ffffff",
+                color: hotplaceMode ? "#fff" : "#b45309",
+                fontWeight: 800,
+                fontSize: 12,
+              }}
+            >
+              핫플모드(최근 급상승)
+            </button>
           </div>
         </div>
 
@@ -483,6 +626,23 @@ export default function Page() {
 
         {!loading && !error && items.length > 0 && prepared.length === 0 ? (
           <div style={{ padding: 12, color: "#6b7280" }}>결과가 없습니다.</div>
+        ) : null}
+        {!loading && !error && hotplaceMode && topHotplace ? (
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #fdba74",
+              background: "#fff7ed",
+              color: "#9a3412",
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            현재 Top 핫플: {topHotplace.name} · 지수 {topHotplace.score.hotplaceScore.toFixed(0)} ·
+            최근 3개월 비율 {topHotplace.score.recentRatioPercent.toFixed(0)}%
+          </div>
         ) : null}
 
         <div style={{ marginTop: 14 }}>
@@ -493,6 +653,12 @@ export default function Page() {
               meta,
               score,
               scoreMax,
+              nopoScore,
+              nopoEvidence,
+              hybridScore,
+              hotplaceScore,
+              hotplaceRatioPercent,
+              sameNameCount,
               adSignals,
               adPenalty,
               promoPenalty,
@@ -506,6 +672,13 @@ export default function Page() {
               meta={meta}
               score={score}
               scoreMax={scoreMax}
+              nopoScore={nopoScore}
+              nopoEvidence={nopoEvidence}
+              isNopoMode={nopoMode}
+              hotplaceScore={hotplaceScore}
+              hotplaceRatioPercent={hotplaceRatioPercent}
+              isHotplaceMode={hotplaceMode}
+              isTopHotplace={topHotplace?.name === it.title}
               region={region}
               adSignals={adSignals}
               adPenalty={adPenalty}
@@ -516,6 +689,9 @@ export default function Page() {
               onAdSignal={updateAdSignal}
               onPromoSignal={updatePromoSignal}
               onBlogVolumeBonus={updateBlogVolumeBonus}
+              onNopoUpdate={updateNopo}
+              onHotplaceUpdate={updateHotplace}
+              sameNameCount={sameNameCount}
               onUpdate={updateMeta}
             />
             ),

@@ -73,33 +73,33 @@ export async function GET(req: Request) {
   }
 
   try {
-    const firstDisplay = Math.min(5, wantedDisplay);
-    const first = await fetchPage(firstDisplay, start);
+    const seen = new Set<string>();
+    const normalizedItems: any[] = [];
+    let firstResponse: any = null;
+    let pageStart = start;
 
-    let mergedItems = Array.isArray(first?.items) ? first.items : [];
-    if (wantedDisplay > 5) {
-      const secondDisplay = wantedDisplay - firstDisplay;
-      const secondStart = start + firstDisplay;
-      const second = await fetchPage(secondDisplay, secondStart);
-      const secondItems = Array.isArray(second?.items) ? second.items : [];
-      mergedItems = [...mergedItems, ...secondItems];
+    // Collect unique places until we reach the requested count.
+    for (let attempt = 0; attempt < 5 && normalizedItems.length < wantedDisplay; attempt += 1) {
+      const page = await fetchPage(5, pageStart);
+      if (!firstResponse) firstResponse = page;
+      const items = Array.isArray(page?.items) ? page.items : [];
+
+      for (const raw of items) {
+        const it = {
+          ...raw,
+          title: stripHtmlTags(String(raw?.title ?? "")),
+        };
+        const key = `${it.title}|${it.roadAddress || it.address || ""}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        normalizedItems.push(it);
+        if (normalizedItems.length >= wantedDisplay) break;
+      }
+
+      pageStart += 5;
     }
 
-    const seen = new Set<string>();
-    const normalizedItems = mergedItems
-      .map((it: any) => ({
-        ...it,
-        title: stripHtmlTags(String(it?.title ?? "")),
-      }))
-      .filter((it: any) => {
-        const key = `${it.title}|${it.roadAddress || it.address || ""}|${it.mapx || ""}|${it.mapy || ""}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      })
-      .slice(0, wantedDisplay);
-
-    const json = { ...first, items: normalizedItems };
+    const json = { ...(firstResponse ?? {}), items: normalizedItems.slice(0, wantedDisplay) };
 
     return Response.json(json, { headers: { "Cache-Control": "no-store" } });
   } catch (err: any) {

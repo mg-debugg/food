@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { NaverBlogItem, NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
+import { computeNopoScore, type NopoResult } from "../lib/nopo";
+import { calculateHotplaceScore, type HotplaceScoreResult } from "../lib/hotplace";
 
 type Region = "수원" | "여수" | "대구";
 
@@ -11,6 +13,13 @@ type Props = {
   meta: PlaceMeta;
   score: number;
   scoreMax: number;
+  nopoScore: number;
+  nopoEvidence: string[];
+  isNopoMode: boolean;
+  hotplaceScore: number;
+  hotplaceRatioPercent: number;
+  isHotplaceMode: boolean;
+  isTopHotplace: boolean;
   region: Region;
   adSignals: number;
   adPenalty: number;
@@ -31,6 +40,9 @@ type Props = {
   onAdSignal: (key: string, suspiciousCount: number) => void;
   onPromoSignal: (key: string, eventCount: number) => void;
   onBlogVolumeBonus: (key: string, bonus: number) => void;
+  onNopoUpdate: (key: string, result: NopoResult) => void;
+  onHotplaceUpdate: (key: string, result: HotplaceScoreResult) => void;
+  sameNameCount: number;
   onUpdate: (key: string, nextMeta: PlaceMeta) => void;
 };
 
@@ -78,6 +90,13 @@ export default function PlaceCard({
   meta,
   score,
   scoreMax,
+  nopoScore,
+  nopoEvidence,
+  isNopoMode,
+  hotplaceScore,
+  hotplaceRatioPercent,
+  isHotplaceMode,
+  isTopHotplace,
   region,
   adSignals,
   adPenalty,
@@ -88,6 +107,9 @@ export default function PlaceCard({
   onAdSignal,
   onPromoSignal,
   onBlogVolumeBonus,
+  onNopoUpdate,
+  onHotplaceUpdate,
+  sameNameCount,
   onUpdate,
 }: Props) {
   const key = placeKey(item);
@@ -131,8 +153,18 @@ export default function PlaceCard({
           onBlogVolumeBonus(key, 0);
           return;
         }
-        const list = (Array.isArray(data?.items) ? data.items : []).slice(0, 3);
+        const list: NaverBlogItem[] = (Array.isArray(data?.items) ? data.items : []).slice(0, 3);
         setBlogs(list);
+
+        onHotplaceUpdate(
+          key,
+          calculateHotplaceScore(
+            list.map((b) => ({
+              date: b.postdate,
+              text: `${b.title || ""} ${b.description || ""}`,
+            })),
+          ),
+        );
 
         const total = Number(data?.total ?? 0);
         let volumeBonus = 0;
@@ -152,11 +184,30 @@ export default function PlaceCard({
           return hasPromoPhrase(merged);
         }).length;
         onPromoSignal(key, promoCount);
+
+        const nopoResult = computeNopoScore({
+          name: item.title,
+          sameNameCount,
+          reviews: list.map((b) => ({
+            text: `${b.title || ""} ${b.description || ""}`,
+            createdAt: b.postdate,
+          })),
+        });
+        onNopoUpdate(key, nopoResult);
       } catch {
         if (mounted) setBlogs([]);
         onAdSignal(key, 0);
         onPromoSignal(key, 0);
         onBlogVolumeBonus(key, 0);
+        onNopoUpdate(
+          key,
+          computeNopoScore({
+            name: item.title,
+            sameNameCount,
+            reviews: [],
+          }),
+        );
+        onHotplaceUpdate(key, calculateHotplaceScore([]));
       } finally {
         if (mounted) setLoadingBlogs(false);
       }
@@ -165,7 +216,17 @@ export default function PlaceCard({
     return () => {
       mounted = false;
     };
-  }, [item.title, region, key, onAdSignal, onPromoSignal, onBlogVolumeBonus]);
+  }, [
+    item.title,
+    region,
+    key,
+    onAdSignal,
+    onPromoSignal,
+    onBlogVolumeBonus,
+    onNopoUpdate,
+    onHotplaceUpdate,
+    sameNameCount,
+  ]);
 
   useEffect(() => {
     let mounted = true;
@@ -261,6 +322,12 @@ export default function PlaceCard({
             {score}/{scoreMax}점
           </div>
           <div style={{ fontSize: 12, color: "#6b7280" }}>로컬 점수</div>
+          <div style={{ marginTop: 4, fontSize: 11, color: "#0f766e", fontWeight: 800 }}>
+            노포지수 {(nopoScore * 100).toFixed(0)}%
+          </div>
+          <div style={{ marginTop: 3, fontSize: 11, color: "#b45309", fontWeight: 800 }}>
+            핫플지수 {hotplaceScore.toFixed(0)} ({hotplaceRatioPercent.toFixed(0)}%)
+          </div>
           {distanceKm != null ? (
             <div style={{ marginTop: 5, fontSize: 11, color: "#2563eb", fontWeight: 800 }}>
               {distanceKm.toFixed(1)}km · 거리+{distanceBonus}
@@ -302,6 +369,40 @@ export default function PlaceCard({
         <span>후기량 {scoreDetail.blogVolume}/3</span>
         <span>광고감점 -{scoreDetail.adPenalty}</span>
         <span>이벤트감점 -{scoreDetail.promoPenalty}</span>
+      </div>
+
+      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {isTopHotplace ? (
+          <span
+            style={{
+              padding: "5px 9px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 800,
+              background: "#fff7ed",
+              color: "#9a3412",
+              border: "1px solid #fdba74",
+            }}
+          >
+            현재 가장 핫한 곳
+          </span>
+        ) : null}
+        {(nopoEvidence.length > 0 ? nopoEvidence : ["노포 근거 데이터 보강 필요"]).map((ev) => (
+          <span
+            key={ev}
+            style={{
+              padding: "5px 9px",
+              borderRadius: 999,
+              fontSize: 11,
+              fontWeight: 700,
+              background: isNopoMode ? "#ecfeff" : isHotplaceMode ? "#fff7ed" : "#f8fafc",
+              color: isNopoMode ? "#155e75" : isHotplaceMode ? "#9a3412" : "#334155",
+              border: "1px solid #cbd5e1",
+            }}
+          >
+            {ev}
+          </span>
+        ))}
       </div>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>

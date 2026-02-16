@@ -13,8 +13,6 @@ function normalize(input: string): string {
 export function placeKey(item: NaverLocalItem): string {
   const title = normalize(item.title ?? "");
   const addr = normalize(item.roadAddress || item.address || "");
-  const mapx = item.mapx ?? "";
-  const mapy = item.mapy ?? "";
-  return `${title}|${addr}|${mapx}|${mapy}`;
+  // Prefer a stable key across repeated searches/sort modes.
+  return `${title}|${addr}`;
 }
-
