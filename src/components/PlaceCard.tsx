@@ -13,7 +13,6 @@ type Props = {
   score: number;
   scoreMax: number;
   searchIndexScore: number;
-  locationBonus: number;
   distanceFromUserKm: number | null;
   adEventPenalty: number;
   penaltyDetectedCount: number;
@@ -49,7 +48,6 @@ export default function PlaceCard({
   score,
   scoreMax,
   searchIndexScore,
-  locationBonus,
   distanceFromUserKm,
   adEventPenalty,
   penaltyDetectedCount,
@@ -259,7 +257,6 @@ export default function PlaceCard({
         }}
       >
         <span>검색지수 +{searchIndexScore.toFixed(1)}</span>
-        <span>위치 가점 +{locationBonus.toFixed(1)}</span>
         <span>{distanceFromUserKm !== null ? `내 위치 ${distanceFromUserKm.toFixed(1)}km` : "위치 미동의"}</span>
         <span>광고/이벤트 감점 -{adEventPenalty.toFixed(1)}</span>
       </div>

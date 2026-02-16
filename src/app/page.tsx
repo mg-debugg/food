@@ -12,7 +12,7 @@ type Region = "수원" | "대구" | "여수" | "광명";
 const REGIONS: Region[] = ["수원", "대구", "여수", "광명"];
 const DISPLAY_LIMIT = 10;
 const EARTH_RADIUS_KM = 6371;
-const NEARBY_DISTANCE_KM = 3;
+const NEARBY_DISTANCE_KM = 5;
 const NON_FOOD_CATEGORY_PATTERNS = [
   /행정복지센터/,
   /주민센터/,
@@ -168,7 +168,7 @@ export default function Page() {
       },
       () => {
         setUseNearbyBoost(false);
-        setError("위치 권한을 허용하면 가까운 곳 우선 가점을 적용할 수 있습니다.");
+        setError("위치 권한을 허용하면 5km 이내 결과만 표시할 수 있습니다.");
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 120000 },
     );
@@ -239,10 +239,8 @@ export default function Page() {
         userLocation && lat !== null && lng !== null
           ? distanceKm(userLocation.lat, userLocation.lng, lat, lng)
           : null;
-      const locationBonus =
-        useNearbyBoost && distanceFromUserKm !== null && distanceFromUserKm <= NEARBY_DISTANCE_KM ? 1 : 0;
       const scoreMax = 5.0;
-      const score = Math.max(0, Math.min(scoreMax, searchIndexScore + locationBonus - adEventPenalty));
+      const score = Math.max(0, Math.min(scoreMax, searchIndexScore - adEventPenalty));
 
       const hotplace =
         hotplaceMap[key] ??
@@ -268,7 +266,6 @@ export default function Page() {
         score,
         scoreMax,
         searchIndexScore,
-        locationBonus,
         distanceFromUserKm,
         adEventPenalty,
         penaltyDetectedCount: penaltySignalMap[key] ?? 0,
@@ -282,8 +279,15 @@ export default function Page() {
       };
     });
 
+    const nearbyFiltered =
+      useNearbyBoost && userLocation
+        ? enriched.filter(
+            (p) => p.distanceFromUserKm !== null && p.distanceFromUserKm <= NEARBY_DISTANCE_KM,
+          )
+        : enriched;
+
     if (hotMode) {
-      const hotSorted = [...enriched];
+      const hotSorted = [...nearbyFiltered];
       hotSorted.sort(
         (a, b) =>
           b.hotRankScore - a.hotRankScore ||
@@ -295,9 +299,9 @@ export default function Page() {
       return hotSorted;
     }
 
-    enriched.sort((a, b) => b.score - a.score || b.meta.updatedAt - a.meta.updatedAt);
-    return enriched;
-  }, [items, region, metaMap, penaltySignalMap, hotplaceMap, hotMode]);
+    nearbyFiltered.sort((a, b) => b.score - a.score || b.meta.updatedAt - a.meta.updatedAt);
+    return nearbyFiltered;
+  }, [items, region, metaMap, penaltySignalMap, hotplaceMap, hotMode, useNearbyBoost, userLocation]);
 
   const topHotplace = useMemo(
     () =>
@@ -442,7 +446,7 @@ export default function Page() {
                 if (!checked) setUserLocation(null);
               }}
             />
-            가까운곳 우선 (위치 동의)
+            5km 이내만 보기 (위치 동의)
           </label>
         </div>
 
@@ -475,7 +479,6 @@ export default function Page() {
               score,
               scoreMax,
               searchIndexScore,
-              locationBonus,
               distanceFromUserKm,
               adEventPenalty,
               penaltyDetectedCount,
@@ -490,7 +493,6 @@ export default function Page() {
                 score={score}
                 scoreMax={scoreMax}
                 searchIndexScore={searchIndexScore}
-                locationBonus={locationBonus}
                 distanceFromUserKm={distanceFromUserKm}
                 adEventPenalty={adEventPenalty}
                 penaltyDetectedCount={penaltyDetectedCount}
