@@ -249,7 +249,7 @@ export default function Page() {
           updatedAt: 0,
         } satisfies PlaceMeta);
 
-      const searchIndexScore = Math.max(0.1, Number((3 - idx * 0.1).toFixed(1)));
+      const searchIndexScore = Math.max(3.0, Number((5 - idx * 0.1).toFixed(1)));
       const adEventPenalty = (penaltySignalMap[key] ?? 0) > 0 ? 1 : 0;
       const lat = parseMapCoordinate(it.mapy);
       const lng = parseMapCoordinate(it.mapx);
