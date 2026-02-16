@@ -6,7 +6,7 @@ import type { NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 import { loadMeta, saveMeta } from "../lib/storage";
 import { computeNopoScore, type NopoResult } from "../lib/nopo";
-import { getTopHotplace, type HotplaceScoreResult } from "../lib/hotplace";
+import type { HotplaceScoreResult } from "../lib/hotplace";
 
 type Region = "수원" | "여수" | "대구";
 
@@ -18,9 +18,7 @@ export default function Page() {
   const [items, setItems] = useState<NaverLocalItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
   const [nopoMode, setNopoMode] = useState(false);
-  const [hotplaceMode, setHotplaceMode] = useState(false);
 
   const [metaMap, setMetaMap] = useState<Record<string, PlaceMeta>>({});
   const [adSignalMap, setAdSignalMap] = useState<Record<string, number>>({});
@@ -199,7 +197,7 @@ export default function Page() {
     const others = items.filter((it) => !hasRegion(it));
     if (prefer.length > 0) list = [...prefer, ...others];
 
-    const enriched = list.map((it) => {
+    const enriched = list.map((it, idx) => {
       const key = placeKey(it);
       const meta =
         metaMap[key] ??
@@ -212,8 +210,8 @@ export default function Page() {
 
       const adSignals = adSignalMap[key] ?? 0;
       const promoSignals = promoSignalMap[key] ?? 0;
-      const adPenalty = Math.min(3, adSignals);
-      const promoPenalty = Math.min(2, promoSignals);
+      const adPenalty = Math.min(2.1, adSignals * 0.7);
+      const promoPenalty = Math.min(1.2, promoSignals * 0.4);
 
       const coord = parseNaverCoords(it);
       const distance =
@@ -239,15 +237,25 @@ export default function Page() {
         } satisfies HotplaceScoreResult);
 
       const agePoint = nopo.metrics.agePoint;
-      const strongKeywordPoint = nopo.metrics.strongKeywordPoint;
-      const regularKeywordPoint = Math.min(20, nopo.metrics.regularKeywordPoint);
-
-      const scoreMax = 67;
+      // Re-scale legacy rule points to a 10-point model.
+      const ageScore =
+        agePoint >= 30 ? 3.0 : agePoint >= 20 ? 2.0 : agePoint >= 10 ? 1.0 : 0.0;
+      const strongKeywordScore = nopo.metrics.strongKeywordPoint;
+      const regularKeywordScore = nopo.metrics.regularKeywordPoint;
+      const searchIndexScore = Math.max(0.2, 2.0 - idx * 0.2);
+      const distanceScore = distanceBonus >= 2 ? 0.5 : distanceBonus >= 1 ? 0.2 : 0.0;
+      const scoreMax = 10.0;
       const score = Math.max(
-        0,
+        0.0,
         Math.min(
           scoreMax,
-          agePoint + strongKeywordPoint + regularKeywordPoint + distanceBonus - adPenalty - promoPenalty,
+          ageScore +
+            strongKeywordScore +
+            regularKeywordScore +
+            searchIndexScore +
+            distanceScore -
+            adPenalty -
+            promoPenalty,
         ),
       );
 
@@ -275,25 +283,19 @@ export default function Page() {
         distance,
         distanceBonus,
         scoreDetail: {
-          age: agePoint,
-          strongKeyword: strongKeywordPoint,
-          regularKeyword: regularKeywordPoint,
-          distance: distanceBonus,
+          age: ageScore,
+          strongKeyword: strongKeywordScore,
+          regularKeyword: regularKeywordScore,
+          searchIndex: searchIndexScore,
+          distance: distanceScore,
           adPenalty,
           promoPenalty,
         },
       };
     });
 
-    if (hotplaceMode) {
-      enriched.sort(
-        (a, b) =>
-          b.hotplaceScore - a.hotplaceScore ||
-          b.hotplaceRatio - a.hotplaceRatio ||
-          b.score - a.score,
-      );
-    } else if (nopoMode) {
-      enriched.sort((a, b) => b.hybridScore - a.hybridScore || b.nopoScore - a.nopoScore || b.score - a.score);
+    if (nopoMode) {
+      enriched.sort((a, b) => b.nopoScore - a.nopoScore || b.score - a.score);
     } else {
       enriched.sort((a, b) => b.score - a.score || b.meta.updatedAt - a.meta.updatedAt);
     }
@@ -307,29 +309,10 @@ export default function Page() {
     promoSignalMap,
     nopoMap,
     hotplaceMap,
-    hotplaceMode,
     nopoMode,
     useDistanceBonus,
     userLocation,
   ]);
-
-  const topHotplace = useMemo(
-    () =>
-      getTopHotplace(
-        prepared.map((p) => ({
-          name: p.it.title,
-          score: {
-            hotplaceScore: p.hotplaceScore,
-            recentRatio: p.hotplaceRatio,
-            recentRatioPercent: p.hotplaceRatioPercent,
-            recent3mCount: p.hotplaceRecentCount,
-            totalReviewCount: 0,
-            multiplier: 1,
-          },
-        })),
-      ),
-    [prepared],
-  );
 
   return (
     <div
@@ -458,15 +441,9 @@ export default function Page() {
             </div>
           ) : null}
 
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
             <button
-              onClick={() =>
-                setNopoMode((v) => {
-                  const next = !v;
-                  if (next) setHotplaceMode(false);
-                  return next;
-                })
-              }
+              onClick={() => setNopoMode((v) => !v)}
               style={{
                 padding: "6px 10px",
                 borderRadius: 999,
@@ -477,29 +454,10 @@ export default function Page() {
                 fontSize: 12,
               }}
             >
-              노포모드(찐 노포)
-            </button>
-            <button
-              onClick={() =>
-                setHotplaceMode((v) => {
-                  const next = !v;
-                  if (next) setNopoMode(false);
-                  return next;
-                })
-              }
-              style={{
-                padding: "6px 10px",
-                borderRadius: 999,
-                border: "1px solid #b45309",
-                background: hotplaceMode ? "#b45309" : "#ffffff",
-                color: hotplaceMode ? "#fff" : "#b45309",
-                fontWeight: 800,
-                fontSize: 12,
-              }}
-            >
-              핫플모드(최근 급상승)
+              노포모드 {nopoMode ? "ON" : "OFF"}
             </button>
           </div>
+
         </div>
 
         {loading ? <div style={{ padding: 12, color: "#6b7280" }}>검색중...</div> : null}
@@ -508,23 +466,6 @@ export default function Page() {
         {!loading && !error && items.length > 0 && prepared.length === 0 ? (
           <div style={{ padding: 12, color: "#6b7280" }}>결과가 없습니다.</div>
         ) : null}
-        {!loading && !error && hotplaceMode && topHotplace ? (
-          <div
-            style={{
-              marginTop: 10,
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: "1px solid #fdba74",
-              background: "#fff7ed",
-              color: "#9a3412",
-              fontSize: 13,
-              fontWeight: 700,
-            }}
-          >
-            현재 Top 핫플: {topHotplace.name} · 지수 {topHotplace.score.hotplaceScore.toFixed(0)} · 최근 3개월 비율 {topHotplace.score.recentRatioPercent.toFixed(0)}%
-          </div>
-        ) : null}
-
         <div style={{ marginTop: 14 }}>
           {prepared.map(
             ({
@@ -553,11 +494,8 @@ export default function Page() {
                 scoreMax={scoreMax}
                 nopoScore={nopoScore}
                 nopoEvidence={nopoEvidence}
-                isNopoMode={nopoMode}
                 hotplaceScore={hotplaceScore}
                 hotplaceRatioPercent={hotplaceRatioPercent}
-                isHotplaceMode={hotplaceMode}
-                isTopHotplace={topHotplace?.name === it.title}
                 region={region}
                 adSignals={adSignals}
                 adPenalty={adPenalty}

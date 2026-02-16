@@ -7,85 +7,78 @@ export type NopoInput = {
   name: string;
   reviews: NopoReview[];
   sameNameCount?: number;
-  menuFocusScore?: number | null;
   now?: Date;
 };
 
 export type NopoResult = {
   nopoScore: number;
-  timelineScore: number;
-  regularsTextScore: number;
-  menuFocusScore: number;
-  namePatternScore: number;
-  penaltyScore: number;
   evidence: string[];
   metrics: {
     oldestReviewAgeYears: number;
     uniqueYearCount: number;
-    recentAlive: number;
-    posCount: number;
-    negCount: number;
+    latestReviewAgeMonths: number;
+    positiveCount: number;
+    negativeCount: number;
+    adEventDetected: number;
     franchiseLikely: number;
     agePoint: number;
-    strongKeywordCount: number;
-    regularKeywordCount: number;
     strongKeywordPoint: number;
     regularKeywordPoint: number;
+    menuFocusPoint: number;
+    adPenaltyPoint: number;
   };
 };
 
-const POS_TEXT_PATTERNS = [
+const BASE_SCORE = 5;
+
+const POSITIVE_PATTERNS = [
   /단골/g,
-  /\d+\s*년/g,
-  /몇\s*년/g,
   /오래/g,
-  /어릴\s*때부터/g,
   /변함없/g,
-  /그대로/g,
+  /어릴/g,
   /동네/g,
   /주민/g,
-  /아버지/g,
-  /할머니/g,
-  /옛날/g,
-] as const;
-
-const NEG_TEXT_PATTERNS = [
-  /협찬/g,
-  /제공/g,
-  /광고/g,
-  /원고료/g,
-  /체험단/g,
-  /오픈/g,
-  /신상/g,
-  /핫플/g,
-  /인스타/g,
-  /포토존/g,
-] as const;
-
-const POS_NAME_PATTERNS = [
-  /식당/g,
-  /국밥/g,
-  /해장국/g,
-  /분식/g,
-  /칼국수/g,
-  /백반/g,
-  /원조/g,
-  /본가/g,
+  /몇\s*년/g,
+  /\d+\s*년/g,
+  /십년/g,
   /2대/g,
   /3대/g,
   /since/gi,
-  /노포/g,
 ] as const;
 
-const NEG_NAME_PATTERNS = [/키친/g, /다이닝/g, /랩/g, /하우스/g, /바/g, /라운지/g] as const;
-const STRONG_BONUS_PATTERNS = [/아저씨/g, /등산객/g, /택시/g, /기사님/g, /반주/g, /낮술/g] as const;
-const REGULAR_BONUS_PATTERNS = [/10년/g, /단골/g, /옛날/g, /허름/g, /노포/g] as const;
+const STRONG_POSITIVE_PATTERNS = [/2대/g, /3대/g, /since/gi, /몇\s*십년/g, /십년/g] as const;
 
-function clamp(n: number, min = 0, max = 1): number {
-  return Math.min(max, Math.max(min, n));
+const NEGATIVE_PATTERNS = [/신상/g, /오픈/g, /핫플/g, /인스타/g, /포토존/g] as const;
+
+const AD_EVENT_PATTERNS = [/협찬/g, /제공/g, /광고/g, /체험단/g, /리뷰\s*이벤트/g, /원고료/g] as const;
+
+const FOOD_PATTERNS = [
+  /국밥/g,
+  /해장국/g,
+  /곱창/g,
+  /순대/g,
+  /냉면/g,
+  /칼국수/g,
+  /제육/g,
+  /김치찌개/g,
+  /된장찌개/g,
+  /불고기/g,
+  /삼겹/g,
+  /짬뽕/g,
+  /짜장/g,
+  /탕수육/g,
+  /돈까스/g,
+  /초밥/g,
+  /라멘/g,
+] as const;
+
+const AMBIENCE_PATTERNS = [/인테리어/g, /감성/g, /분위기/g, /사진/g, /포토/g, /뷰/g] as const;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
 }
 
-function toDate(input: string | Date | null | undefined): Date | null {
+function parseDate(input: string | Date | null | undefined): Date | null {
   if (!input) return null;
   if (input instanceof Date) return Number.isNaN(input.getTime()) ? null : input;
   const s = String(input).trim();
@@ -110,113 +103,132 @@ function countMatches(text: string, patterns: readonly RegExp[]): number {
   return total;
 }
 
-function hasAny(text: string, patterns: readonly RegExp[]): number {
-  return patterns.some((p) => p.test(text)) ? 1 : 0;
+function hasAny(text: string, patterns: readonly RegExp[]): boolean {
+  return patterns.some((p) => p.test(text));
+}
+
+function computeMenuFocusPoint(text: string): number {
+  const foodCounts = FOOD_PATTERNS
+    .map((p) => text.match(p)?.length ?? 0)
+    .filter((n) => n > 0)
+    .sort((a, b) => b - a);
+  const totalMenuMentions = foodCounts.reduce((acc, cur) => acc + cur, 0);
+
+  if (totalMenuMentions > 0) {
+    const top1 = foodCounts[0] ?? 0;
+    const top2 = (foodCounts[0] ?? 0) + (foodCounts[1] ?? 0);
+    const top2Ratio = top2 / Math.max(1, totalMenuMentions);
+    if (top2Ratio >= 0.5) return 1;
+    return 0;
+  }
+
+  const ambienceMentions = countMatches(text, AMBIENCE_PATTERNS);
+  if (ambienceMentions >= 3) return -1;
+  return 0;
 }
 
 export function computeNopoScore(input: NopoInput): NopoResult {
   const now = input.now ?? new Date();
   const reviews = Array.isArray(input.reviews) ? input.reviews : [];
-  const createdDates = reviews
-    .map((r) => toDate(r.createdAt))
+  const allText = reviews.map((r) => r.text || "").join(" ").toLowerCase();
+
+  const adEventDetected = hasAny(allText, AD_EVENT_PATTERNS) ? 1 : 0;
+  const adPenaltyPoint = adEventDetected ? 1 : 0;
+
+  const dates = reviews
+    .map((r) => parseDate(r.createdAt))
     .filter((d): d is Date => d !== null)
     .sort((a, b) => a.getTime() - b.getTime());
 
-  let timelineScore = 0.5;
-  let oldestReviewAgeYears = 0;
-  let uniqueYearCount = 0;
-  let recentAlive = 0;
+  const oldestReviewAgeYears =
+    dates.length > 0 ? (now.getTime() - dates[0].getTime()) / (365.25 * 24 * 60 * 60 * 1000) : 0;
+  const uniqueYearCount = dates.length > 0 ? new Set(dates.map((d) => d.getFullYear())).size : 0;
+  const latestReviewAgeMonths =
+    dates.length > 0
+      ? (now.getTime() - dates[dates.length - 1].getTime()) / (30.4375 * 24 * 60 * 60 * 1000)
+      : 999;
 
-  if (createdDates.length > 0) {
-    const oldest = createdDates[0];
-    const latest = createdDates[createdDates.length - 1];
-    const yearMs = 365.25 * 24 * 60 * 60 * 1000;
-
-    oldestReviewAgeYears = (now.getTime() - oldest.getTime()) / yearMs;
-    const reviewSpanYears = (latest.getTime() - oldest.getTime()) / yearMs;
-    const yearsBetweenOldestAndNow = Math.max(
-      1,
-      Math.round((now.getTime() - oldest.getTime()) / yearMs),
-    );
-    uniqueYearCount = new Set(createdDates.map((d) => d.getFullYear())).size;
-    const yearCoverage = uniqueYearCount / Math.max(1, yearsBetweenOldestAndNow);
-    const daysFromLatest = (now.getTime() - latest.getTime()) / (24 * 60 * 60 * 1000);
-    recentAlive = daysFromLatest <= 180 ? 1 : 0;
-
-    const ageScore = clamp(oldestReviewAgeYears / 8);
-    const spanScore = clamp(reviewSpanYears / 6);
-    const coverScore = clamp(yearCoverage);
-    const aliveScore = recentAlive;
-
-    timelineScore = clamp(
-      0.35 * ageScore + 0.25 * spanScore + 0.25 * coverScore + 0.15 * aliveScore,
-    );
-  }
-
-  const allText = reviews.map((r) => r.text || "").join(" ").toLowerCase();
-  const posCount = countMatches(allText, POS_TEXT_PATTERNS);
-  const negCount = countMatches(allText, NEG_TEXT_PATTERNS);
-  const posScore = 1 - Math.exp(-posCount / 6);
-  const negScore = 1 - Math.exp(-negCount / 4);
-  const regularsTextScore = clamp(posScore - 0.8 * negScore);
-
-  const menuFocusScore =
-    input.menuFocusScore == null || Number.isNaN(input.menuFocusScore)
-      ? 0.5
-      : clamp(input.menuFocusScore);
-
-  const name = (input.name || "").toLowerCase();
-  const namePos = hasAny(name, POS_NAME_PATTERNS);
-  const nameNeg = hasAny(name, NEG_NAME_PATTERNS);
-  const namePatternScore = clamp(0.6 * namePos - 0.6 * nameNeg + 0.5);
-
-  const franchiseLikely = (input.sameNameCount ?? 1) >= 3 ? 1 : 0;
-  const penaltyScore = clamp(1 - (0.7 * franchiseLikely + 0.5 * negScore));
-
-  const strongKeywordCount = countMatches(allText, STRONG_BONUS_PATTERNS);
-  const regularKeywordCount = countMatches(allText, REGULAR_BONUS_PATTERNS);
-  const strongKeywordPoint = Math.min(15, strongKeywordCount * 3);
-  const regularKeywordPoint = regularKeywordCount * 2;
-  const agePoint =
-    oldestReviewAgeYears >= 30 ? 30 : oldestReviewAgeYears >= 20 ? 20 : oldestReviewAgeYears >= 10 ? 10 : 0;
-
-  const nopoScore = clamp(
-    0.4 * timelineScore +
-      0.25 * regularsTextScore +
-      0.15 * menuFocusScore +
-      0.1 * namePatternScore +
-      0.1 * penaltyScore,
-  );
+  let addPoints = 0;
+  let minusPoints = 0;
+  let agePoint = 0;
+  let strongKeywordPoint = 0;
+  let regularKeywordPoint = 0;
+  let menuFocusPoint = 0;
+  let positiveCount = 0;
+  let negativeCount = 0;
 
   const evidence: string[] = [];
-  if (oldestReviewAgeYears >= 6) evidence.push("리뷰가 오래전부터 존재");
-  if (uniqueYearCount >= 4) evidence.push("여러 해에 걸친 리뷰");
-  if (recentAlive === 1) evidence.push("최근에도 방문 리뷰");
-  if (posCount >= 5) evidence.push("단골/오래됨 언급 많음");
-  if (negCount === 0) evidence.push("광고성 키워드 적음");
-  if (franchiseLikely === 1) evidence.push("프랜차이즈 의심");
-  if (evidence.length === 0) evidence.push("노포 근거 데이터 보강 필요");
+
+  // Cold-start: keep base score. Only ad penalty (always) + franchise penalty apply.
+  if (reviews.length >= 3) {
+    if (oldestReviewAgeYears >= 6) {
+      agePoint += 2;
+      evidence.push("리뷰 6년 이상 존재");
+    } else if (oldestReviewAgeYears >= 3) {
+      agePoint += 1;
+      evidence.push("리뷰 3년 이상 존재");
+    }
+    if (uniqueYearCount >= 4) {
+      addPoints += 1;
+      evidence.push("여러 해에 걸친 리뷰");
+    }
+    if (latestReviewAgeMonths <= 6) {
+      addPoints += 1;
+      evidence.push("최근 방문 리뷰 있음");
+    } else if (latestReviewAgeMonths > 12) {
+      minusPoints += 1;
+    }
+
+    positiveCount = countMatches(allText, POSITIVE_PATTERNS);
+    negativeCount = countMatches(allText, NEGATIVE_PATTERNS);
+
+    if (positiveCount >= 5) {
+      regularKeywordPoint += 1;
+      evidence.push("단골/오래됨 언급 다수");
+    }
+
+    if (hasAny(allText, STRONG_POSITIVE_PATTERNS)) {
+      strongKeywordPoint += 1;
+    }
+
+    if (negativeCount >= 4) {
+      minusPoints += 1;
+    }
+
+    menuFocusPoint = computeMenuFocusPoint(allText);
+  }
+
+  addPoints += agePoint + strongKeywordPoint + regularKeywordPoint + menuFocusPoint;
+
+  if (adPenaltyPoint > 0) {
+    minusPoints += adPenaltyPoint;
+    evidence.push("광고성 키워드 발견");
+  }
+
+  const franchiseLikely = (input.sameNameCount ?? 1) >= 3 ? 1 : 0;
+  if (franchiseLikely) {
+    minusPoints += 1;
+    evidence.push("프랜차이즈 의심");
+  }
+
+  const nopoScore = Math.round(clamp(BASE_SCORE + addPoints - minusPoints, 0, 10) * 10) / 10;
 
   return {
     nopoScore,
-    timelineScore,
-    regularsTextScore,
-    menuFocusScore,
-    namePatternScore,
-    penaltyScore,
     evidence: evidence.slice(0, 3),
     metrics: {
       oldestReviewAgeYears,
       uniqueYearCount,
-      recentAlive,
-      posCount,
-      negCount,
+      latestReviewAgeMonths,
+      positiveCount,
+      negativeCount,
+      adEventDetected,
       franchiseLikely,
       agePoint,
-      strongKeywordCount,
-      regularKeywordCount,
       strongKeywordPoint,
       regularKeywordPoint,
+      menuFocusPoint,
+      adPenaltyPoint,
     },
   };
 }

@@ -15,11 +15,8 @@ type Props = {
   scoreMax: number;
   nopoScore: number;
   nopoEvidence: string[];
-  isNopoMode: boolean;
   hotplaceScore: number;
   hotplaceRatioPercent: number;
-  isHotplaceMode: boolean;
-  isTopHotplace: boolean;
   region: Region;
   adSignals: number;
   adPenalty: number;
@@ -30,6 +27,7 @@ type Props = {
     age: number;
     strongKeyword: number;
     regularKeyword: number;
+    searchIndex: number;
     distance: number;
     adPenalty: number;
     promoPenalty: number;
@@ -88,11 +86,8 @@ export default function PlaceCard({
   scoreMax,
   nopoScore,
   nopoEvidence,
-  isNopoMode,
   hotplaceScore,
   hotplaceRatioPercent,
-  isHotplaceMode,
-  isTopHotplace,
   region,
   adSignals,
   adPenalty,
@@ -304,7 +299,7 @@ export default function PlaceCard({
 
         <div style={{ textAlign: "right", flexShrink: 0, minWidth: 74 }}>
           <div style={{ fontWeight: 900, fontSize: 22, color: "#0f172a" }}>
-            {score}/{scoreMax}점
+            {score.toFixed(1)}/{scoreMax.toFixed(1)}점
           </div>
           <div style={{ fontSize: 12, color: "#6b7280" }}>로컬 점수</div>
           <div style={{ marginTop: 4, fontSize: 11, color: "#0f766e", fontWeight: 800 }}>
@@ -345,30 +340,16 @@ export default function PlaceCard({
           flexWrap: "wrap",
         }}
       >
-        <span>업력 {scoreDetail.age}/30</span>
-        <span>현지키워드 {scoreDetail.strongKeyword}/15</span>
-        <span>노포키워드 {scoreDetail.regularKeyword}/20</span>
-        <span>거리 {scoreDetail.distance}/2</span>
-        <span>광고감점 -{scoreDetail.adPenalty}</span>
-        <span>이벤트감점 -{scoreDetail.promoPenalty}</span>
+        <span>업력 +{scoreDetail.age.toFixed(1)}</span>
+        <span>현지키워드 +{scoreDetail.strongKeyword.toFixed(1)}</span>
+        <span>노포키워드 +{scoreDetail.regularKeyword.toFixed(1)}</span>
+        <span>검색지수 +{scoreDetail.searchIndex.toFixed(1)}</span>
+        <span>거리 +{scoreDetail.distance.toFixed(1)}</span>
+        <span>광고감점 -{scoreDetail.adPenalty.toFixed(1)}</span>
+        <span>이벤트감점 -{scoreDetail.promoPenalty.toFixed(1)}</span>
       </div>
 
       <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {isTopHotplace ? (
-          <span
-            style={{
-              padding: "5px 9px",
-              borderRadius: 999,
-              fontSize: 11,
-              fontWeight: 800,
-              background: "#fff7ed",
-              color: "#9a3412",
-              border: "1px solid #fdba74",
-            }}
-          >
-            현재 가장 핫한 곳
-          </span>
-        ) : null}
         {(nopoEvidence.length > 0 ? nopoEvidence : ["노포 근거 데이터 보강 필요"]).map((ev) => (
           <span
             key={ev}
@@ -377,8 +358,8 @@ export default function PlaceCard({
               borderRadius: 999,
               fontSize: 11,
               fontWeight: 700,
-              background: isNopoMode ? "#ecfeff" : isHotplaceMode ? "#fff7ed" : "#f8fafc",
-              color: isNopoMode ? "#155e75" : isHotplaceMode ? "#9a3412" : "#334155",
+              background: "#f8fafc",
+              color: "#334155",
               border: "1px solid #cbd5e1",
             }}
           >
