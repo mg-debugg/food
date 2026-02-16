@@ -200,7 +200,7 @@ export default function PlaceCard({
               {addr}
             </div>
             <div style={{ fontSize: 11, color: penaltyDetectedCount > 0 ? "#b91c1c" : "#6b7280", fontWeight: 700, whiteSpace: "nowrap" }}>
-              광고/이벤트 {penaltyDetectedCount}건
+              광고/이벤트 감지 {penaltyDetectedCount}건
             </div>
           </div>
           <div

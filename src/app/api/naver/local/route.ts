@@ -28,6 +28,7 @@ export async function GET(req: Request) {
   const start = clampInt(sp.get("start") ?? "1", 1, 1000, 1);
   const sortRaw = (sp.get("sort") ?? "random").toLowerCase();
   const sort = sortRaw === "comment" ? "comment" : "random";
+  const pageSize = 5;
 
   if (!query) {
     return Response.json(
@@ -54,12 +55,12 @@ export async function GET(req: Request) {
     "X-Naver-Client-Secret": clientSecret,
   };
 
-  async function fetchPage(display: number, pageStart: number) {
+  async function fetchPage(display: number, pageStart: number, sortMode: "random" | "comment") {
     const endpoint = `https://openapi.naver.com/v1/search/local.json?query=${encodeURIComponent(
       finalQuery,
     )}&display=${encodeURIComponent(String(display))}&start=${encodeURIComponent(
       String(pageStart),
-    )}&sort=${encodeURIComponent(sort)}`;
+    )}&sort=${encodeURIComponent(sortMode)}`;
     const res = await fetch(endpoint, {
       method: "GET",
       headers,
@@ -78,8 +79,8 @@ export async function GET(req: Request) {
     let firstResponse: any = null;
     let pageStart = start;
 
-    for (let attempt = 0; attempt < 10 && normalizedItems.length < wantedDisplay; attempt += 1) {
-      const page = await fetchPage(10, pageStart);
+    for (let attempt = 0; attempt < 20 && normalizedItems.length < wantedDisplay; attempt += 1) {
+      const page = await fetchPage(pageSize, pageStart, sort);
       if (!firstResponse) firstResponse = page;
       const items = Array.isArray(page?.items) ? page.items : [];
 
@@ -95,7 +96,31 @@ export async function GET(req: Request) {
         if (normalizedItems.length >= wantedDisplay) break;
       }
 
-      pageStart += 10;
+      pageStart += pageSize;
+    }
+
+    // Fallback pass: when random/page dedupe leaves fewer than 10, try comment sort.
+    if (normalizedItems.length < wantedDisplay && sort !== "comment") {
+      let fallbackStart = start;
+      for (let attempt = 0; attempt < 20 && normalizedItems.length < wantedDisplay; attempt += 1) {
+        const page = await fetchPage(pageSize, fallbackStart, "comment");
+        if (!firstResponse) firstResponse = page;
+        const items = Array.isArray(page?.items) ? page.items : [];
+
+        for (const raw of items) {
+          const it = {
+            ...raw,
+            title: stripHtmlTags(String(raw?.title ?? "")),
+          };
+          const key = `${it.title}|${it.roadAddress || it.address || ""}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          normalizedItems.push(it);
+          if (normalizedItems.length >= wantedDisplay) break;
+        }
+
+        fallbackStart += pageSize;
+      }
     }
 
     const json = { ...(firstResponse ?? {}), items: normalizedItems.slice(0, wantedDisplay) };

@@ -279,12 +279,13 @@ export default function Page() {
       };
     });
 
-    const nearbyFiltered =
-      useNearbyBoost && userLocation
+    const nearbyFiltered = useNearbyBoost
+      ? userLocation
         ? enriched.filter(
             (p) => p.distanceFromUserKm !== null && p.distanceFromUserKm <= NEARBY_DISTANCE_KM,
           )
-        : enriched;
+        : []
+      : enriched;
 
     if (hotMode) {
       const hotSorted = [...nearbyFiltered];
@@ -452,6 +453,12 @@ export default function Page() {
 
         {loading ? <div style={{ padding: 12, color: "#6b7280" }}>검색중...</div> : null}
         {error ? <div style={{ padding: 12, color: "#b91c1c" }}>{error}</div> : null}
+        {!loading && !error && useNearbyBoost && !userLocation ? (
+          <div style={{ padding: 12, color: "#6b7280" }}>현재 위치 확인 중입니다. 확인 후 5km 이내 식당만 표시됩니다.</div>
+        ) : null}
+        {!loading && !error && useNearbyBoost && userLocation && prepared.length === 0 ? (
+          <div style={{ padding: 12, color: "#6b7280" }}>5km 이내 식당이 없습니다.</div>
+        ) : null}
 
         {!loading && !error && hotMode && topHotplace ? (
           <div
