@@ -1,6 +1,6 @@
 export const runtime = "nodejs";
 
-const ALLOWED_REGIONS = ["수원", "여수", "대구"] as const;
+const ALLOWED_REGIONS = ["수원", "대구", "여수", "광명"] as const;
 type Region = (typeof ALLOWED_REGIONS)[number];
 
 function stripHtmlTags(s: string): string {
@@ -41,7 +41,7 @@ export async function GET(req: Request) {
     );
   }
 
-  const finalQuery = `${region} ${query} 내돈내산`;
+  const finalQuery = `${region} ${query} 지역맛집`;
   const endpoint = `https://openapi.naver.com/v1/search/blog.json?query=${encodeURIComponent(
     finalQuery,
   )}&display=${encodeURIComponent(display)}&start=${encodeURIComponent(
@@ -76,8 +76,7 @@ export async function GET(req: Request) {
       })
       .filter(
         (it: any) =>
-          String(it.title).includes("내돈내산") ||
-          String(it.description).includes("내돈내산"),
+          String(it.title).includes("맛집") || String(it.description).includes("맛집"),
       )
       .slice(0, 3);
 
@@ -92,4 +91,3 @@ export async function GET(req: Request) {
     );
   }
 }
-

@@ -5,7 +5,7 @@ import type { NaverBlogItem, NaverLocalItem, PlaceMeta } from "../lib/types";
 import { placeKey } from "../lib/placeKey";
 import { calculateHotplaceScore, type HotplaceScoreResult } from "../lib/hotplace";
 
-type Region = "수원" | "여수" | "대구";
+type Region = "수원" | "대구" | "여수" | "광명";
 
 type Props = {
   item: NaverLocalItem;
@@ -14,6 +14,7 @@ type Props = {
   scoreMax: number;
   searchIndexScore: number;
   locationBonus: number;
+  distanceFromUserKm: number | null;
   adEventPenalty: number;
   penaltyDetectedCount: number;
   hotplaceRecentCount: number;
@@ -49,6 +50,7 @@ export default function PlaceCard({
   scoreMax,
   searchIndexScore,
   locationBonus,
+  distanceFromUserKm,
   adEventPenalty,
   penaltyDetectedCount,
   hotplaceRecentCount,
@@ -127,7 +129,7 @@ export default function PlaceCard({
     let mounted = true;
     const run = async () => {
       try {
-        const params = new URLSearchParams({ query: item.title, region });
+        const params = new URLSearchParams({ query: `${item.title} 대표메뉴 음식`, region });
         const res = await fetch(`/api/naver/image?${params.toString()}`);
         const data = await res.json().catch(() => null);
         if (!mounted) return;
@@ -160,60 +162,55 @@ export default function PlaceCard({
     >
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-            <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1.2, color: "#111827" }}>{item.title}</div>
-              <div style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>{item.category}</div>
-              <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>{addr}</div>
-              {item.telephone ? <div style={{ marginTop: 4, fontSize: 12, color: "#6b7280" }}>{item.telephone}</div> : null}
-            </div>
-
-            <div
-              style={{
-                width: 120,
-                height: 90,
-                borderRadius: 12,
-                overflow: "hidden",
-                flexShrink: 0,
-                border: "1px solid #e5e7eb",
-                background: "#f3f4f6",
-              }}
-            >
-              {menuImage ? (
-                <img
-                  src={menuImage}
-                  alt={`${item.title} 대표 메뉴`}
-                  style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  loading="lazy"
-                  referrerPolicy="no-referrer"
-                />
-              ) : (
-                <div
-                  style={{
-                    width: "100%",
-                    height: "100%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontSize: 11,
-                    color: "#6b7280",
-                    fontWeight: 700,
-                  }}
-                >
-                  메뉴 이미지
-                </div>
-              )}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+            <div style={{ fontWeight: 900, fontSize: 18, lineHeight: 1.2, color: "#111827" }}>{item.title}</div>
+            <div style={{ fontWeight: 900, fontSize: 20, color: "#0f172a", whiteSpace: "nowrap" }}>
+              {score.toFixed(1)}/5.0점
             </div>
           </div>
-        </div>
-
-        <div style={{ textAlign: "right", flexShrink: 0, minWidth: 74 }}>
-          <div style={{ fontWeight: 900, fontSize: 22, color: "#0f172a" }}>
-            {score.toFixed(1)}/{scoreMax.toFixed(1)}점
+          <div style={{ marginTop: 6, display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+            <div style={{ fontSize: 12, color: "#6b7280", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {addr}
+            </div>
+            <div style={{ fontSize: 11, color: penaltyDetectedCount > 0 ? "#b91c1c" : "#6b7280", fontWeight: 700, whiteSpace: "nowrap" }}>
+              광고/이벤트 {penaltyDetectedCount}건
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: "#6b7280" }}>점수</div>
-          <div style={{ marginTop: 4, fontSize: 11, color: penaltyDetectedCount > 0 ? "#b91c1c" : "#6b7280", fontWeight: 700 }}>
-            광고/이벤트 단어 탐지 {penaltyDetectedCount}건
+          <div
+            style={{
+              marginTop: 8,
+              width: "100%",
+              height: 180,
+              borderRadius: 12,
+              overflow: "hidden",
+              border: "1px solid #e5e7eb",
+              background: "#f3f4f6",
+            }}
+          >
+            {menuImage ? (
+              <img
+                src={menuImage}
+                alt={`${item.title} 음식 사진`}
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                loading="lazy"
+                referrerPolicy="no-referrer"
+              />
+            ) : (
+              <div
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 11,
+                  color: "#6b7280",
+                  fontWeight: 700,
+                }}
+              >
+                음식 사진
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -234,6 +231,7 @@ export default function PlaceCard({
       >
         <span>검색지수 +{searchIndexScore.toFixed(1)}</span>
         <span>위치 가점 +{locationBonus.toFixed(1)}</span>
+        <span>{distanceFromUserKm !== null ? `내 위치 ${distanceFromUserKm.toFixed(1)}km` : "위치 미동의"}</span>
         <span>광고/이벤트 감점 -{adEventPenalty.toFixed(1)}</span>
       </div>
 

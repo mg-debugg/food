@@ -7,11 +7,50 @@ import { placeKey } from "../lib/placeKey";
 import { loadMeta, saveMeta } from "../lib/storage";
 import { getTopHotplace, type HotplaceScoreResult } from "../lib/hotplace";
 
-type Region = "수원" | "여수" | "대구";
+type Region = "수원" | "대구" | "여수" | "광명";
 
-const REGIONS: Region[] = ["수원", "여수", "대구"];
+const REGIONS: Region[] = ["수원", "대구", "여수", "광명"];
 const EARTH_RADIUS_KM = 6371;
 const NEARBY_DISTANCE_KM = 3;
+const NON_FOOD_CATEGORY_PATTERNS = [
+  /행정복지센터/,
+  /주민센터/,
+  /구청/,
+  /시청/,
+  /공공/,
+  /사회기관/,
+  /관공서/,
+  /복지/,
+  /병원/,
+  /약국/,
+  /학교/,
+  /학원/,
+  /부동산/,
+  /은행/,
+  /숙박/,
+  /호텔/,
+  /펜션/,
+];
+const FOOD_CATEGORY_PATTERNS = [
+  /음식점/,
+  /한식/,
+  /중식/,
+  /일식/,
+  /양식/,
+  /카페/,
+  /분식/,
+  /치킨/,
+  /피자/,
+  /족발/,
+  /보쌈/,
+  /국밥/,
+  /해장국/,
+  /고기/,
+  /술집/,
+  /포차/,
+  /디저트/,
+  /베이커리/,
+];
 
 function toRadians(degree: number): number {
   return (degree * Math.PI) / 180;
@@ -32,6 +71,14 @@ function parseMapCoordinate(raw: string): number | null {
   if (!Number.isFinite(n) || n === 0) return null;
   if (Math.abs(n) > 1000) return n / 10_000_000;
   return n;
+}
+
+function isFoodPlace(it: NaverLocalItem): boolean {
+  const category = (it.category || "").trim();
+  if (!category) return true;
+  if (NON_FOOD_CATEGORY_PATTERNS.some((p) => p.test(category))) return false;
+  if (FOOD_CATEGORY_PATTERNS.some((p) => p.test(category))) return true;
+  return !/센터|기관|학교|병원|약국|은행|호텔|모텔|공공|관공서/.test(category);
 }
 
 export default function Page() {
@@ -159,10 +206,11 @@ export default function Page() {
     const hasRegion = (it: NaverLocalItem) =>
       (it.address || "").includes(region) || (it.roadAddress || "").includes(region);
 
-    let list = items;
+    let list = items.filter(isFoodPlace);
     const prefer = items.filter(hasRegion);
-    const others = items.filter((it) => !hasRegion(it));
-    if (prefer.length > 0) list = [...prefer, ...others];
+    const others = list.filter((it) => !hasRegion(it));
+    const preferredFood = prefer.filter(isFoodPlace);
+    if (preferredFood.length > 0) list = [...preferredFood, ...others];
 
     const enriched = list.map((it, idx) => {
       const key = placeKey(it);
@@ -179,9 +227,13 @@ export default function Page() {
       const adEventPenalty = (penaltySignalMap[key] ?? 0) > 0 ? 1 : 0;
       const lat = parseMapCoordinate(it.mapy);
       const lng = parseMapCoordinate(it.mapx);
+      const distanceFromUserKm =
+        userLocation && lat !== null && lng !== null
+          ? distanceKm(userLocation.lat, userLocation.lng, lat, lng)
+          : null;
       const locationBonus =
-        useNearbyBoost && userLocation && lat !== null && lng !== null && distanceKm(userLocation.lat, userLocation.lng, lat, lng) <= NEARBY_DISTANCE_KM ? 1 : 0;
-      const scoreMax = 6.0;
+        useNearbyBoost && distanceFromUserKm !== null && distanceFromUserKm <= NEARBY_DISTANCE_KM ? 1 : 0;
+      const scoreMax = 5.0;
       const score = Math.max(0, Math.min(scoreMax, searchIndexScore + locationBonus - adEventPenalty));
 
       const hotplace =
@@ -209,6 +261,7 @@ export default function Page() {
         scoreMax,
         searchIndexScore,
         locationBonus,
+        distanceFromUserKm,
         adEventPenalty,
         penaltyDetectedCount: penaltySignalMap[key] ?? 0,
         hotplaceScore: hotplace.hotplaceScore,
@@ -381,7 +434,7 @@ export default function Page() {
                 if (!checked) setUserLocation(null);
               }}
             />
-            가까운곳 우선 (위치 동의, +1점)
+            가까운곳 우선 (위치 동의)
           </label>
         </div>
 
@@ -415,6 +468,7 @@ export default function Page() {
               scoreMax,
               searchIndexScore,
               locationBonus,
+              distanceFromUserKm,
               adEventPenalty,
               penaltyDetectedCount,
               hotplaceRecentCount,
@@ -429,6 +483,7 @@ export default function Page() {
                 scoreMax={scoreMax}
                 searchIndexScore={searchIndexScore}
                 locationBonus={locationBonus}
+                distanceFromUserKm={distanceFromUserKm}
                 adEventPenalty={adEventPenalty}
                 penaltyDetectedCount={penaltyDetectedCount}
                 hotplaceRecentCount={hotplaceRecentCount}

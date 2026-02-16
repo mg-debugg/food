@@ -1,6 +1,6 @@
 export const runtime = "nodejs";
 
-const ALLOWED_REGIONS = ["수원", "여수", "대구"] as const;
+const ALLOWED_REGIONS = ["수원", "대구", "여수", "광명"] as const;
 type Region = (typeof ALLOWED_REGIONS)[number];
 
 function stripHtmlTags(s: string): string {
@@ -78,7 +78,6 @@ export async function GET(req: Request) {
     let firstResponse: any = null;
     let pageStart = start;
 
-    // Collect unique places until we reach the requested count.
     for (let attempt = 0; attempt < 5 && normalizedItems.length < wantedDisplay; attempt += 1) {
       const page = await fetchPage(5, pageStart);
       if (!firstResponse) firstResponse = page;
