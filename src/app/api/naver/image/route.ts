@@ -139,6 +139,47 @@ function pickBestImageByName(name: string, candidates: MapRestaurantSummary[]): 
   return "";
 }
 
+function decodeHtmlEntities(input: string): string {
+  return String(input || "")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+async function fetchImageFromNaverImageSearch(name: string, region: Region): Promise<string> {
+  const clientId = process.env.NAVER_CLIENT_ID;
+  const clientSecret = process.env.NAVER_CLIENT_SECRET;
+  if (!clientId || !clientSecret) return "";
+
+  const queries = [`${region} ${name} 음식점`, `${name} 음식점`, `${region} ${name}`];
+
+  for (const query of queries) {
+    const endpoint = `https://openapi.naver.com/v1/search/image.json?query=${encodeURIComponent(
+      query,
+    )}&display=5&sort=sim`;
+    const res = await fetch(endpoint, {
+      method: "GET",
+      headers: {
+        "X-Naver-Client-Id": clientId,
+        "X-Naver-Client-Secret": clientSecret,
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) continue;
+
+    const json = (await res.json().catch(() => null)) as { items?: Array<{ link?: string }> } | null;
+    const items = Array.isArray(json?.items) ? json.items : [];
+    for (const item of items) {
+      const candidate = decodeHtmlEntities(String(item?.link || ""));
+      if (isHttpUrl(candidate)) return candidate;
+    }
+  }
+
+  return "";
+}
+
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const sp = url.searchParams;
@@ -191,6 +232,10 @@ export async function GET(req: Request) {
       const candidates = collectCandidates(apolloState);
       image = pickBestImageByName(name, candidates);
       if (image) break;
+    }
+
+    if (!image) {
+      image = await fetchImageFromNaverImageSearch(name, region);
     }
 
     imageCache.set(cacheKey, {
